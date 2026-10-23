@@ -125,5 +125,9 @@ def control_icon(kind: str, size: int = 16) -> QIcon:
             p.drawPolyline([QPointF(6, 3), QPointF(1.5, 3), QPointF(1.5, s - 2), QPointF(s - 1.5, s - 2), QPointF(s - 1.5, 3), QPointF(11, 3)])
         elif kind == "Panel":
             p.setPen(QPen(col, 1.2, Qt.DashLine)); p.drawRect(QRectF(1.5, 1.5, s - 3, s - 3))
+        else:                                             # Standard: abgerundetes Feld mit Anfangsbuchstaben
+            p.drawRoundedRect(QRectF(1.5, 3.5, s - 3, s - 7), 2.5, 2.5)
+            f = QFont(); f.setBold(True); f.setPixelSize(max(7, s // 2 - 1)); p.setFont(f); p.setPen(acc)
+            p.drawText(pm.rect(), Qt.AlignCenter, kind[:1])
         p.end(); _cache[key] = QIcon(pm)
     return _cache[key]

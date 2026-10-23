@@ -533,6 +533,8 @@ class MainWindow(QMainWindow):
         form = doc is not None and doc.kind == "form"
         target = doc.run_target if doc else None
         lang = lang_for(target) if target else None
+        if target:
+            self.toolbox.set_language(lang.id if lang else None)      # Codeausschnitte passend zur Sprache der aktuellen Datei
         self.st_lang.setText("Formular-Designer" if form else "Vergleich" if doc and doc.kind == "diff" else (lang.name if lang else "Nur Text"))
         self._start_text = f" {target.name}" if target else " Starten"
         self._refresh_run_state()

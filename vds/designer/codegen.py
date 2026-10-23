@@ -32,10 +32,35 @@ def font_lines(var: str, props: dict) -> list:
     return []
 
 
+def widget_imports(model: dict) -> str:
+    """`from PySide6.QtWidgets import (...)` nur mit den Klassen, die das Formular wirklich benutzt (mehrzeilig, sortiert)."""
+    names = {"QWidget"}
+    for c in model["controls"]:
+        spec = BY_TYPE[c["type"]]
+        names.add(spec.qt.__name__)
+        names.update(spec.imports)
+        if c["type"] == "Line":
+            names.add("QFrame")
+        if any(k in c["props"] for k in ("password",)):
+            names.add("QLineEdit")
+    from PySide6 import QtWidgets
+    names.discard("QWidget")
+    items = sorted(n for n in names if hasattr(QtWidgets, n))      # Klassen aus QtGui (z. B. QPixmap) sind bereits importiert
+    if not items:
+        return ""
+    lines, cur = [], ""
+    for n in items:
+        piece = n + ", "
+        if len(cur) + len(piece) > 100:
+            lines.append(cur.rstrip()); cur = ""
+        cur += piece
+    lines.append(cur.rstrip().rstrip(","))
+    return "from PySide6.QtWidgets import (" + ("\n" + " " * 31).join(lines) + ")\n"
+
+
 def designer_source(model: dict, cls: str) -> str:
-    L = [HEADER, "from PySide6.QtCore import Qt\nfrom PySide6.QtGui import QColor, QFont, QPalette\n",
-         "from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGroupBox, QLabel, QLineEdit, QListWidget,\n"
-         "                               QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSlider, QSpinBox)\n\n\n",
+    L = [HEADER, "from PySide6.QtCore import Qt\nfrom PySide6.QtGui import QColor, QFont, QPalette, QPixmap\n",
+         widget_imports(model), "\n\n",
          f"class Ui_{cls}:\n", "    def setup_ui(self, root):\n",
          f"        root.setObjectName({cls!r})\n", f"        root.setWindowTitle({model['title']!r})\n",
          f"        root.resize({model['width']}, {model['height']})\n"]

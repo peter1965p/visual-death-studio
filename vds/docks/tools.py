@@ -3,11 +3,11 @@ import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QLineEdit, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
-from ..build.languages import LANGS, lang_for
+from ..build.languages import BY_ID, LANGS, lang_for
 from ..designer.canvas import MIME
-from ..designer.controls import SPECS
+from ..designer.controls import CATEGORIES, SPECS
 from ..icons import control_icon
 
 CTRL_ROLE = Qt.UserRole + 1
@@ -41,40 +41,8 @@ class Properties(QTableWidget):
             self.item(i, 1).setToolTip(v)
 
 
-class Toolbox(QTreeWidget):
-    insertSnippet = Signal(str)
-    controlActivated = Signal(str)     # Doppelklick auf ein Control -> im aktiven Designer einfügen
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setHeaderHidden(True)
-        self.setDragEnabled(True)
-        self.setDragDropMode(QTreeWidget.DragOnly)
-        groups = {}
-        for spec in SPECS:
-            g = groups.get(spec.category) or groups.setdefault(spec.category, QTreeWidgetItem(self, [spec.category]))
-            it = QTreeWidgetItem(g, [spec.type])
-            it.setIcon(0, control_icon(spec.type))
-            it.setData(0, CTRL_ROLE, spec.type)
-        general = QTreeWidgetItem(self, ["Allgemein"])
-        for label, text in [("TODO-Kommentar", "TODO: "), ("Datum/Uhrzeit", datetime.date.today().isoformat())]:
-            self._add(general, label, text)
-        for l in LANGS:
-            if l.snippets:
-                g = QTreeWidgetItem(self, [f"Codeausschnitte – {l.name}"])
-                for label, text in l.snippets.items():
-                    self._add(g, label, text)
-        self.expandAll()
-        for i in range(self.topLevelItemCount()):
-            if self.topLevelItem(i).text(0) == "Allgemein" or self.topLevelItem(i).text(0).startswith("Codeausschnitte"):
-                self.topLevelItem(i).setExpanded(False)
-        self.itemDoubleClicked.connect(self._double)
-
-    def _double(self, it, _c):
-        if it.data(0, CTRL_ROLE):
-            self.controlActivated.emit(it.data(0, CTRL_ROLE))
-        elif it.data(0, Qt.UserRole):
-            self.insertSnippet.emit(it.data(0, Qt.UserRole))
+class _Tree(QTreeWidget):
+    """Baum mit Drag-Unterstützung: Controls werden als MIME-Daten auf den Designer gezogen."""
 
     def mimeTypes(self):
         return [MIME]
@@ -85,10 +53,101 @@ class Toolbox(QTreeWidget):
             m.setData(MIME, items[0].data(0, CTRL_ROLE).encode())
         return m
 
+
+class Toolbox(QWidget):
+    """Toolbox: alle Steuerelemente des Designers (nach Kategorien und A–Z, mit Suche) plus Codeausschnitte für die Sprache der aktuellen Datei."""
+    insertSnippet = Signal(str)
+    controlActivated = Signal(str)     # Doppelklick auf ein Control -> im aktiven Designer einfügen
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lang_id: str | None = None
+        self.search = QLineEdit(placeholderText="Toolbox durchsuchen …")
+        self.tree = _Tree(); self.tree.setHeaderHidden(True)
+        self.tree.setDragEnabled(True); self.tree.setDragDropMode(QTreeWidget.DragOnly)
+        lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
+        lay.addWidget(self.search); lay.addWidget(self.tree, 1)
+        self.search.textChanged.connect(self.apply_filter)
+        self.tree.itemDoubleClicked.connect(self._double)
+        self._expanded: dict = {}
+        self.rebuild()
+
+    # --- Aufbau ---------------------------------------------------------------------------------------------------
+    def set_language(self, lang_id: str | None):
+        if lang_id != self.lang_id:
+            self.lang_id = lang_id
+            self.rebuild()
+
+    def _remember(self):
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            self._expanded[it.text(0)] = it.isExpanded()
+
+    def rebuild(self):
+        self._remember()
+        self.tree.clear()
+        by_cat: dict = {}
+        for spec in SPECS:
+            by_cat.setdefault(spec.category, []).append(spec)
+        for cat in CATEGORIES:
+            if cat in by_cat:
+                g = QTreeWidgetItem(self.tree, [f"{cat}  ({len(by_cat[cat])})"])
+                g.setData(0, Qt.UserRole + 2, cat)
+                for spec in by_cat[cat]:
+                    self._control(g, spec)
+        allg = QTreeWidgetItem(self.tree, [f"Alle Steuerelemente (A–Z)  ({len(SPECS)})"])
+        for spec in sorted(SPECS, key=lambda x: x.type.lower()):
+            self._control(allg, spec)
+        lang = BY_ID.get(self.lang_id or "")
+        general = QTreeWidgetItem(self.tree, ["Allgemein"])
+        for label, text in [("TODO-Kommentar", "TODO: "), ("Datum", datetime.date.today().isoformat()), ("Uhrzeit", datetime.datetime.now().strftime("%H:%M")),
+                            ("Lorem ipsum", "Lorem ipsum dolor sit amet, consectetur adipiscing elit.")]:
+            self._snippet(general, label, text)
+        if lang and lang.snippets:
+            g = QTreeWidgetItem(self.tree, [f"Codeausschnitte – {lang.name}  ({len(lang.snippets)})"])
+            for label, text in lang.snippets.items():
+                self._snippet(g, label, text)
+        elif not lang:
+            hint = QTreeWidgetItem(self.tree, ["Codeausschnitte: öffne eine Code-Datei"])
+            hint.setFlags(Qt.NoItemFlags)
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            default = i == 0 or it.text(0).startswith("Codeausschnitte")
+            it.setExpanded(self._expanded.get(it.text(0), default))
+        self.apply_filter()
+
+    def _control(self, parent, spec):
+        it = QTreeWidgetItem(parent, [spec.type])
+        it.setIcon(0, control_icon(spec.type))
+        it.setData(0, CTRL_ROLE, spec.type)
+        it.setToolTip(0, f"{spec.type} ({spec.qt.__name__}) – auf das Formular ziehen oder doppelklicken")
+
     @staticmethod
-    def _add(parent, label, text):
+    def _snippet(parent, label, text):
         it = QTreeWidgetItem(parent, [label])
         it.setData(0, Qt.UserRole, text)
+        it.setToolTip(0, text)
+
+    # --- Suche -------------------------------------------------------------------------------------------------------
+    def apply_filter(self):
+        q = self.search.text().strip().lower()
+        for i in range(self.tree.topLevelItemCount()):
+            g = self.tree.topLevelItem(i)
+            shown = 0
+            for j in range(g.childCount()):
+                ch = g.child(j)
+                hit = not q or q in ch.text(0).lower()
+                ch.setHidden(not hit)
+                shown += hit
+            g.setHidden(bool(q) and shown == 0)
+            if q and shown:
+                g.setExpanded(True)
+
+    def _double(self, it, _c):
+        if it.data(0, CTRL_ROLE):
+            self.controlActivated.emit(it.data(0, CTRL_ROLE))
+        elif it.data(0, Qt.UserRole):
+            self.insertSnippet.emit(it.data(0, Qt.UserRole))
 
 
 class Breakpoints(QTableWidget):

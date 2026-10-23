@@ -3,9 +3,11 @@ Eine Stelle beschreibt, wie ein Control live (Qt-Widget) und im erzeugten Python
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGroupBox, QLabel, QLineEdit, QListWidget, QPlainTextEdit,
-                               QProgressBar, QPushButton, QRadioButton, QSlider, QSpinBox)
+from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtWidgets import (QCalendarWidget, QCheckBox, QComboBox, QCommandLinkButton, QDateEdit, QDateTimeEdit, QDial, QDialogButtonBox,
+                               QDoubleSpinBox, QFontComboBox, QFrame, QGroupBox, QKeySequenceEdit, QLabel, QLCDNumber, QLineEdit, QListView,
+                               QListWidget, QMenuBar, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QScrollBar, QSlider, QSpinBox, QStatusBar,
+                               QTableView, QTableWidget, QTextBrowser, QTimeEdit, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem)
 
 
 class Raw:
@@ -24,12 +26,13 @@ class Spec:
     defaults: dict = field(default_factory=dict)
     event: tuple | None = None                 # (qt-signal, handler-suffix, [argnamen])
     category: str = "Allgemeine Steuerelemente"
+    imports: tuple = ()                        # zusätzliche Klassen, die der erzeugte Code importieren muss
 
 
 SPECS = [
-    Spec("Button", QPushButton, (100, 32), "button", ["text"], {"text": "@name"}, ("clicked", "clicked", [])),
-    Spec("Label", QLabel, (80, 20), "label", ["text"], {"text": "@name"}),
-    Spec("TextBox", QLineEdit, (150, 26), "textBox", ["text", "placeholder", "readonly"], {"text": ""},
+    Spec("Button", QPushButton, (100, 32), "button", ["text", "flat"], {"text": "@name"}, ("clicked", "clicked", [])),
+    Spec("Label", QLabel, (80, 20), "label", ["text", "word_wrap", "alignment"], {"text": "@name"}),
+    Spec("TextBox", QLineEdit, (150, 26), "textBox", ["text", "placeholder", "readonly", "password", "alignment"], {"text": ""},
          ("textChanged", "text_changed", ["text"])),
     Spec("RichTextBox", QPlainTextEdit, (200, 100), "richTextBox", ["text", "readonly"], {"text": ""}),
     Spec("CheckBox", QCheckBox, (110, 22), "checkBox", ["text", "checked"], {"text": "@name", "checked": False},
@@ -46,9 +49,44 @@ SPECS = [
          {"minimum": 0, "maximum": 100, "value": 0, "orientation": "Horizontal"}, ("valueChanged", "value_changed", ["value"])),
     Spec("ProgressBar", QProgressBar, (150, 22), "progressBar", ["minimum", "maximum", "value"],
          {"minimum": 0, "maximum": 100, "value": 40}),
+    Spec("ToolButton", QToolButton, (60, 28), "toolButton", ["text"], {"text": "…"}, ("clicked", "clicked", [])),
+    Spec("CommandLinkButton", QCommandLinkButton, (220, 48), "commandLinkButton", ["text"], {"text": "@name"}, ("clicked", "clicked", [])),
+    # --- Eingabe
+    Spec("DateEdit", QDateEdit, (120, 26), "dateEdit", [], {}, ("dateChanged", "date_changed", ["date"]), "Eingabe"),
+    Spec("TimeEdit", QTimeEdit, (100, 26), "timeEdit", [], {}, ("timeChanged", "time_changed", ["time"]), "Eingabe"),
+    Spec("DateTimeEdit", QDateTimeEdit, (170, 26), "dateTimeEdit", [], {}, ("dateTimeChanged", "datetime_changed", ["value"]), "Eingabe"),
+    Spec("DoubleSpinBox", QDoubleSpinBox, (90, 26), "doubleSpinBox", ["minimum", "maximum", "value"], {"minimum": 0, "maximum": 100, "value": 0},
+         ("valueChanged", "value_changed", ["value"]), "Eingabe"),
+    Spec("Dial", QDial, (80, 80), "dial", ["minimum", "maximum", "value"], {"minimum": 0, "maximum": 100, "value": 0},
+         ("valueChanged", "value_changed", ["value"]), "Eingabe"),
+    Spec("ScrollBar", QScrollBar, (150, 18), "scrollBar", ["minimum", "maximum", "value", "orientation"],
+         {"minimum": 0, "maximum": 100, "value": 0, "orientation": "Horizontal"}, ("valueChanged", "value_changed", ["value"]), "Eingabe"),
+    Spec("FontComboBox", QFontComboBox, (200, 26), "fontComboBox", [], {}, ("currentFontChanged", "font_changed", ["font"]), "Eingabe"),
+    Spec("KeySequenceEdit", QKeySequenceEdit, (150, 26), "keySequenceEdit", [], {}, ("keySequenceChanged", "key_sequence_changed", ["sequence"]), "Eingabe"),
+    # --- Anzeige
+    Spec("LcdNumber", QLCDNumber, (100, 40), "lcdNumber", ["value"], {"value": 0}, None, "Anzeige"),
+    Spec("CalendarWidget", QCalendarWidget, (260, 190), "calendarWidget", [], {}, ("selectionChanged", "selection_changed", []), "Anzeige"),
+    Spec("TextBrowser", QTextBrowser, (200, 100), "textBrowser", ["text"], {"text": ""}, None, "Anzeige"),
+    Spec("Line", QFrame, (150, 3), "line", ["orientation"], {"orientation": "Horizontal"}, None, "Anzeige"),
+    # --- Daten
+    Spec("TreeWidget", QTreeWidget, (200, 150), "treeWidget", ["items"], {"items": ["Eintrag 1", "Eintrag 2"]},
+         ("itemSelectionChanged", "selection_changed", []), "Daten", ("QTreeWidgetItem",)),
+    Spec("TableWidget", QTableWidget, (300, 150), "tableWidget", ["rows", "columns"], {"rows": 3, "columns": 3},
+         ("itemSelectionChanged", "selection_changed", []), "Daten"),
+    Spec("ListView", QListView, (150, 100), "listView", [], {}, None, "Daten"),
+    Spec("TableView", QTableView, (300, 150), "tableView", [], {}, None, "Daten"),
+    Spec("TreeView", QTreeView, (200, 150), "treeView", [], {}, None, "Daten"),
+    Spec("PictureBox", QLabel, (120, 90), "pictureBox", ["image"], {"image": ""}, None, "Anzeige", ("QPixmap",)),
+    # --- Menüs und Leisten
+    Spec("MenuBar", QMenuBar, (300, 26), "menuBar", ["items"], {"items": ["Datei", "Bearbeiten", "Hilfe"]}, None, "Menüs und Leisten"),
+    Spec("StatusBar", QStatusBar, (300, 24), "statusBar", ["text"], {"text": "Bereit"}, None, "Menüs und Leisten"),
+    # --- Dialoge
+    Spec("DialogButtonBox", QDialogButtonBox, (220, 32), "buttonBox", [], {}, ("accepted", "accepted", []), "Dialoge"),
+    # --- Container
     Spec("GroupBox", QGroupBox, (200, 120), "groupBox", ["title"], {"title": "@name"}, category="Container"),
     Spec("Panel", QFrame, (200, 120), "panel", [], {}, category="Container"),
 ]
+CATEGORIES = ["Allgemeine Steuerelemente", "Eingabe", "Anzeige", "Daten", "Menüs und Leisten", "Dialoge", "Container"]
 BY_TYPE = {s.type: s for s in SPECS}
 
 COMMON = ["enabled", "visible", "tooltip", "font", "back_color", "fore_color"]
@@ -60,13 +98,15 @@ PROP_INFO = {
     "text": ("Text", "str", "Darstellung"), "title": ("Text", "str", "Darstellung"),
     "font_size": ("Schriftgröße", "int", "Darstellung"),
     "font": ("Font", "font", "Darstellung"), "back_color": ("BackColor", "color", "Darstellung"), "fore_color": ("ForeColor", "color", "Darstellung"), "placeholder": ("Platzhalter", "str", "Darstellung"),
-    "orientation": ("Ausrichtung", "choice", "Darstellung"),
+    "orientation": ("Ausrichtung", "choice", "Darstellung"), "alignment": ("Textausrichtung", "choice", "Darstellung"),
+    "flat": ("Flat", "bool", "Darstellung"), "word_wrap": ("WordWrap", "bool", "Darstellung"), "password": ("Passwort", "bool", "Verhalten"),
+    "rows": ("Zeilen", "int", "Daten"), "columns": ("Spalten", "int", "Daten"), "image": ("Bilddatei", "str", "Darstellung"),
     "enabled": ("Enabled", "bool", "Verhalten"), "visible": ("Visible", "bool", "Verhalten"),
     "readonly": ("ReadOnly", "bool", "Verhalten"), "checked": ("Checked", "bool", "Verhalten"),
     "tooltip": ("ToolTip", "str", "Verhalten"), "items": ("Items (Komma-getrennt)", "items", "Daten"),
     "minimum": ("Minimum", "int", "Daten"), "maximum": ("Maximum", "int", "Daten"), "value": ("Value", "int", "Daten"),
 }
-CHOICES = {"orientation": ["Horizontal", "Vertical"]}
+CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"]}
 
 
 KIND_DEFAULT = {"str": "", "int": 0, "bool": False, "items": [], "choice": "", "color": "", "font": ""}
@@ -85,10 +125,31 @@ def prop_keys(spec: Spec) -> list:
 def calls(ctype: str, key: str, val):
     """Setter-Aufrufe für eine Eigenschaft: [(methodenname, args)]. '@font' ist ein Sonderfall."""
     if key == "text":
-        return [("setPlainText" if ctype == "RichTextBox" else "setText", (val,))]
+        if ctype == "StatusBar":
+            return [("showMessage", (val,))]
+        return [("setPlainText" if ctype in ("RichTextBox", "TextBrowser") else "setText", (val,))]
+    if key == "image":
+        return [("setScaledContents", (True,)), ("setPixmap", (Raw(f"QPixmap({val!r})", QPixmap(val) if val else QPixmap()),))]
+    if key == "items" and ctype == "MenuBar":
+        return [("clear", ())] + [("addMenu", (t,)) for t in val]
+    if key == "orientation" and ctype == "Line":
+        shape = "HLine" if val == "Horizontal" else "VLine"
+        return [("setFrameShape", (Raw(f"QFrame.{shape}", getattr(QFrame, shape)),)), ("setFrameShadow", (Raw("QFrame.Sunken", QFrame.Sunken),))]
+    if key == "value" and ctype == "LcdNumber":
+        return [("display", (val,))]
+    if key == "items" and ctype == "TreeWidget":
+        code = "[" + ", ".join(f"QTreeWidgetItem([{t!r}])" for t in val) + "]"
+        return [("clear", ()), ("setHeaderHidden", (True,)), ("addTopLevelItems", (Raw(code, [QTreeWidgetItem([t]) for t in val]),))]
+    if key == "password":
+        mode = "Password" if val else "Normal"
+        return [("setEchoMode", (Raw(f"QLineEdit.{mode}", getattr(QLineEdit, mode)),))]
+    if key == "alignment":
+        h = {"Links": "AlignLeft", "Mitte": "AlignHCenter", "Rechts": "AlignRight"}.get(val, "AlignLeft")
+        return [("setAlignment", (Raw(f"Qt.{h} | Qt.AlignVCenter", getattr(Qt, h) | Qt.AlignVCenter),))]
     simple = {"title": "setTitle", "placeholder": "setPlaceholderText", "readonly": "setReadOnly",
               "checked": "setChecked", "enabled": "setEnabled", "visible": "setVisible", "tooltip": "setToolTip",
-              "minimum": "setMinimum", "maximum": "setMaximum", "value": "setValue"}
+              "minimum": "setMinimum", "maximum": "setMaximum", "value": "setValue",
+              "flat": "setFlat", "word_wrap": "setWordWrap", "rows": "setRowCount", "columns": "setColumnCount"}
     if key in simple:
         return [(simple[key], (val,))]
     if key == "items":
