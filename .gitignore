@@ -1,0 +1,11 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.vds/
+workspace/
+*.bak
+.pytest_cache/
+node_modules/
+.vscode/

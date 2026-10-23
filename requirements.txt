@@ -1,0 +1,7 @@
+PySide6>=6.7
+Pygments>=2.17
+pyte>=0.8
+python-lsp-server[pyflakes]>=1.12
+rope>=1.12
+pylsp-rope>=0.1.16
+debugpy>=1.8

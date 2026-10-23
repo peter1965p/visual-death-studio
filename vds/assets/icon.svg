@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a2477"/>
+      <stop offset="1" stop-color="#150d26"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f1f4fa"/>
+      <stop offset="1" stop-color="#aab4c8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)" stroke="#b180d7" stroke-width="6"/>
+
+  <!-- Geodreieck -->
+  <path d="M34 214 L222 214 L128 112 Z" fill="#7fd6e8" fill-opacity="0.55" stroke="#9eeaf6" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M128 150 L98 190 L158 190 Z" fill="#150d26" fill-opacity="0.45"/>
+  <g stroke="#e9fbff" stroke-width="2.5" stroke-linecap="round"><line x1="48" y1="208" x2="48" y2="195"/><line x1="56" y1="208" x2="56" y2="201"/><line x1="64" y1="208" x2="64" y2="195"/><line x1="72" y1="208" x2="72" y2="201"/><line x1="80" y1="208" x2="80" y2="195"/><line x1="88" y1="208" x2="88" y2="201"/><line x1="96" y1="208" x2="96" y2="195"/><line x1="104" y1="208" x2="104" y2="201"/><line x1="112" y1="208" x2="112" y2="195"/><line x1="120" y1="208" x2="120" y2="201"/><line x1="128" y1="208" x2="128" y2="195"/><line x1="136" y1="208" x2="136" y2="201"/><line x1="144" y1="208" x2="144" y2="195"/><line x1="152" y1="208" x2="152" y2="201"/><line x1="160" y1="208" x2="160" y2="195"/><line x1="168" y1="208" x2="168" y2="201"/><line x1="176" y1="208" x2="176" y2="195"/><line x1="184" y1="208" x2="184" y2="201"/><line x1="192" y1="208" x2="192" y2="195"/><line x1="200" y1="208" x2="200" y2="201"/><line x1="208" y1="208" x2="208" y2="195"/></g>
+
+  <!-- Zirkel -->
+  <g stroke-linecap="round" fill="none">
+    <line x1="128" y1="62" x2="82" y2="196" stroke="url(#metal)" stroke-width="11"/>
+    <line x1="128" y1="62" x2="174" y2="178" stroke="url(#metal)" stroke-width="11"/>
+    <line x1="82" y1="196" x2="76" y2="214" stroke="#e9eef8" stroke-width="3.5"/>
+    <line x1="172" y1="174" x2="177" y2="190" stroke="#f0a73a" stroke-width="12"/>
+  </g>
+  <path d="M170.5 189 L183.5 189 L177 207 Z" fill="#2a2038"/>
+  <rect x="121" y="30" width="14" height="20" rx="4" fill="#d5dbe8"/>
+  <circle cx="128" cy="62" r="10" fill="#e4e9f4" stroke="#7a86a0" stroke-width="3"/>
+  <circle cx="128" cy="62" r="3.5" fill="#7a86a0"/>
+</svg>
