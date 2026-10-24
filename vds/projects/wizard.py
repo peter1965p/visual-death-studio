@@ -111,6 +111,8 @@ class NewProjectDialog(QDialog):
         self.claude.finished.connect(self._ai_finished)
         self._base = None
         self.proc: QProcess | None = None            # laufender Scaffold-Befehl (z. B. composer create-project)
+        self.pip: QProcess | None = None             # pip install -r requirements.txt im neuen .venv
+        self._opts: dict = {}
         self._scaffold = None                        # (Zielordner, existierte vorher, Optionen, Beschreibung)
         self.back = QPushButton("Zurück"); self.next = QPushButton("Weiter"); self.next.setObjectName("primary")
         cancel = QPushButton("Abbrechen")
@@ -354,7 +356,7 @@ class NewProjectDialog(QDialog):
 
     def _create(self):
         tpl = self.eff
-        opts = {k: c.isChecked() for k, c in self.checks.items() if k in tpl.options}
+        opts = self._opts = {k: c.isChecked() for k, c in self.checks.items() if k in tpl.options}
         loc = Path(self.location.text().strip()).expanduser()
         if tpl.scaffold:
             return self._start_scaffold(loc, opts)
@@ -370,7 +372,51 @@ class NewProjectDialog(QDialog):
         desc = self.desc.toPlainText().strip()
         if desc and backend.available():
             return self._start_ai(desc)
+        if self._wants_install():
+            return self._start_install()
         self.accept()
+
+    # --- Python-Pakete ins neue .venv ----------------------------------------------------------------
+    def _wants_install(self) -> bool:
+        """Soll nach dem Anlegen (und nach Claudes Arbeit) die requirements.txt ins neue .venv installiert werden?"""
+        if not self._opts.get("venv") or not self.result_data:
+            return False
+        root = self.result_data[0]
+        req = root / "requirements.txt"
+        try:
+            has = any(l.strip() and not l.lstrip().startswith("#") for l in req.read_text(encoding="utf-8").splitlines())
+        except OSError:
+            return False
+        return has and (root / ".venv/bin/python").is_file()
+
+    def _start_install(self):
+        root, _main, log = self.result_data
+        self._go(3)
+        self.prog_title.setText("Python-Pakete werden installiert …")
+        self.prog_sub.setText("pip install -r requirements.txt – bei Qt (PySide6) sind das einige hundert MB, das dauert eine Weile.")
+        self.next.setEnabled(False); self.cancel.setText("Überspringen")
+        self.ai_log.appendPlainText("\n$ pip install -r requirements.txt")
+        self.bar.setRange(0, 0)
+        p = self.pip = QProcess(self)
+        p.setWorkingDirectory(str(root))
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        p.readyRead.connect(lambda: self.ai_log.appendPlainText(bytes(p.readAll()).decode("utf-8", "replace").rstrip()))
+        p.finished.connect(self._install_done)
+        p.errorOccurred.connect(lambda e: e == QProcess.FailedToStart and self._install_done(-1, QProcess.CrashExit))
+        p.start(str(root / ".venv/bin/python"), ["-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"])
+
+    def _install_done(self, code, status):
+        p, self.pip = self.pip, None
+        if p is None:
+            return
+        root, main, log = self.result_data
+        ok = code == 0 and status == QProcess.NormalExit
+        log.append("  Python-Pakete aus requirements.txt installiert." if ok else
+                   "  Pakete konnten nicht installiert werden – im Paket-Manager oder mit 'pip install -r requirements.txt' im .venv nachholen.")
+        self.bar.setRange(0, 1); self.bar.setValue(1 if ok else 0)
+        self.prog_title.setText("Projekt erstellt" if ok else "Projekt erstellt – Pakete fehlen noch")
+        self.prog_sub.setText("Fertig – mit F5 startest du die Anwendung." if ok else "Die Installation ist fehlgeschlagen (Meldung unten). Das Projekt lässt sich trotzdem öffnen.")
+        self.next.setEnabled(True); self.cancel.setText("Schließen")
 
     # --- Projekte, die ein Werkzeug anlegt (composer create-project …) ---------------------------------
     def _start_scaffold(self, loc: Path, opts: dict):
@@ -447,6 +493,8 @@ class NewProjectDialog(QDialog):
             self.ai_log.appendPlainText("\n⚠ " + result)
             log += [f"Claude-Fehler: {result}"]
         self.result_data = (root, new_main, log)
+        if self._wants_install():
+            return self._start_install()
         self.next.setEnabled(True); self.cancel.setText("Schließen")
 
     def _stop_scaffold(self):
@@ -458,7 +506,21 @@ class NewProjectDialog(QDialog):
             return True
         return False
 
+    def _stop_install(self) -> bool:
+        p, self.pip = self.pip, None
+        if p is None:
+            return False
+        p.kill(); p.waitForFinished(3000)
+        self.result_data[2].append("  Paketinstallation übersprungen – später im Paket-Manager nachholen.")
+        return True
+
     def _cancel(self):
+        if self._stop_install():
+            self.bar.setRange(0, 1); self.bar.setValue(0)
+            self.prog_title.setText("Projekt erstellt – Pakete fehlen noch")
+            self.prog_sub.setText("Die Installation wurde übersprungen. Du kannst sie später im Paket-Manager nachholen.")
+            self.next.setEnabled(True); self.cancel.setText("Schließen")
+            return
         if self._stop_scaffold():
             self.bar.setRange(0, 1); self.bar.setValue(0)
             self.prog_title.setText("Abgebrochen"); self.prog_sub.setText("Das angefangene Projekt wurde entfernt.")
@@ -470,6 +532,7 @@ class NewProjectDialog(QDialog):
         self.reject()
 
     def reject(self):
+        self._stop_install()
         self._stop_scaffold()
         self.claude.stop()
         super().reject()

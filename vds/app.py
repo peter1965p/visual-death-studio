@@ -401,6 +401,7 @@ class MainWindow(QMainWindow):
         self.bps.toggled.connect(lambda path, line, on: self._bp_edit(path, line, enabled=on))
         self.bps.removed.connect(lambda path, line: self._bp_edit(path, line, remove=True))
         self.dbg.stateChanged.connect(self._dbg_state)
+        self.dbg.moduleMissing.connect(self._debug_module_missing)
         self.p_tests.jumpTo.connect(lambda p, l: self.goto(p, l, 1))
         self.p_tests.debugRequested.connect(lambda fw, ids: self.dbg.debug_test(fw, ids, self.root))
         self.tests.log.connect(lambda t: self.output.append(t, "info"))
@@ -914,6 +915,11 @@ class MainWindow(QMainWindow):
         m = re.search(r"ModuleNotFoundError: No module named '([\w.]+)'", text) if code != 0 else None
         if m:
             QTimer.singleShot(0, lambda mod=m.group(1).split(".")[0]: self._offer_install(mod))
+
+    def _debug_module_missing(self, mod: str):
+        """Beim Debuggen fehlt ein Modul: Sitzung beenden und dasselbe Installationsangebot wie beim normalen Start machen."""
+        self.dbg.stop()
+        self._offer_install(mod)
 
     def _offer_install(self, mod: str):
         name = PIP_NAMES.get(mod, mod)

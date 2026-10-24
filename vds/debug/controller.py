@@ -1,5 +1,6 @@
 """Debug-Steuerung für das Hauptfenster: Start (Python/C/C++/Rust), Zustandsanzeige (Aktionen, Statusleiste), gelbe Ausführungszeile,
 Haltepunkt-Abgleich und Aktualisierung der Debug-Fenster."""
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -14,6 +15,7 @@ from ..theme import t as tc
 
 class DebugController(QObject):
     stateChanged = Signal(str)       # idle | starting | running | paused
+    moduleMissing = Signal(str)      # Python-Modul fehlt (ModuleNotFoundError beim Debuggen)
 
     def __init__(self, win, panels: dict):
         super().__init__(win)
@@ -223,6 +225,9 @@ class DebugController(QObject):
         w = self.w
         if reason == "exception":
             w.output.append(f"\n⚠ Nicht behandelte Ausnahme: {text}\n", "stderr")
+            m = re.search(r"No module named '([\w.]+)'", text or "")
+            if m:
+                self.moduleMissing.emit(m.group(1).split(".")[0])
         if self._first_pause:
             self._first_pause = False
             w.d_locals.show(); w.d_locals.raise_()
