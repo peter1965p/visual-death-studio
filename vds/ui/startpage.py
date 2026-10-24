@@ -30,6 +30,9 @@ def project_kind(path: Path) -> tuple:
         pkg = None
     if has("artisan") and has("composer.json"):
         return "Laravel", "php"
+    from ..web.devserver import _spring_command
+    if _spring_command(path):
+        return "Spring Boot", "java"
     if has("angular.json") or "@angular/core" in deps:
         return "Angular", "typescript"
     if "nuxt" in deps:

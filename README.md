@@ -16,7 +16,7 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
   - **Elemente anklicken** (⌖): Details, Eltern/Kind-Navigation, „Zum Code springen“ (id, Klassen, Text werden im Projekt gesucht; Elemente aus Designer-Seiten öffnen direkt das Formular)
   - **Visuell bearbeiten** (✥): verschieben, Größe per Griff, Text per Doppelklick, Stile (Farbe, Schrift, Abstand, Rahmen …) live im Inspektor
   - **In den Quellcode übernehmen** (Strg+Alt+S): die IDE zeigt die Möglichkeiten mit Unterschied (bestehende CSS-Regel, Tailwind-Klassen, Inline-Style, neue Regel) – erst nach deiner Bestätigung wird geschrieben, mit „Rückgängig“
-- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Angular, Next.js, Nuxt 3, Java Swing; dazu PHP (Skript und Webanwendung mit eingebautem Server)
+- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Angular, Next.js, Nuxt 3, Java Swing, **Spring Boot** (Maven-Wrapper, nur ein JDK nötig); dazu PHP (Skript und Webanwendung mit eingebautem Server)
 - **Start-Befehl** pro Projekt (z. B. `npm run dev`, `php -S …`): F5 startet den Dev-Server, Umschalt+F5 beendet ihn samt Kindprozessen
 - **Sprachabhängige Codeausschnitte** in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung
@@ -26,7 +26,7 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 - **Erstellen** erkennt CMake, Make, Cargo, Go, .NET, Maven, Gradle und npm; eigene Build-/Clean-Befehle und weitere Einstellungen unter Projekt → Eigenschaften
 - **Projekt-Assistent** inklusive „Mit Claude erstellen“
 - **Claude-Chat und -Vervollständigung** wahlweise über die lokale Claude-Code-CLI **oder mit eigenem API-Schlüssel** (Extras → Optionen → Claude; Agent mit Dateiwerkzeugen im Projektordner, Modellwahl, Verbindungstest)
-- **Startseite** (Strg+Umschalt+H, erscheint beim Start): zuletzt geöffnete Projekte mit erkanntem Typ (Laravel, React, Vue, Angular, Python …), Schnellaktionen für neues Projekt, Ordner öffnen, Designer und Web-Vorschau
+- **Startseite** (Strg+Umschalt+H, erscheint beim Start): zuletzt geöffnete Projekte mit erkanntem Typ (Laravel, Spring Boot, React, Vue, Angular, Python …), Schnellaktionen für neues Projekt, Ordner öffnen, Designer und Web-Vorschau
 - **Farbschemata:** Neon (dunkel) und Hell
 - **Optionen** (Strg+,): Editor (Tab-Breite, Zeilenumbruch, Leerraum, Autospeichern), IntelliSense, Designer-Raster, Claude-Anbieter, Export/Import
 - Diff-/Review-Ansicht, Git-Änderungen, Paket-Manager, Terminal

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..designer import codegen
+from .java_templates import SPRING_FILES
 from .maui_gtk import maui_gtk_files
 from .web_templates import ANGULAR_FILES, DEV, NEXT_FILES, NUXT_FILES, PHP_CONSOLE, PHP_WEB, REACT_FILES, VUE_FILES
 
@@ -132,6 +133,11 @@ TEMPLATES = [
     Template("java-swing", "Java-Fensteranwendung (Swing, mit Designer)",
              "Swing-Fenster mit visuellem Formular (Form1): Controls und Layouts im Designer, Ereignisse als überschreibbare Methoden. Start: F5 (java Form1.java).",
              "Java", "java", "Desktop", {}, "Form1.form.json", ("git", "readme"), form_target="java-swing"),
+    Template("java-spring", "Java-Webanwendung (Spring Boot, Maven)",
+             "Spring-Boot-REST-Anwendung mit Beispiel-Controller, Test und Startseite. Maven wird über das mitgelieferte Skript ./mvnw bei Bedarf selbst geladen (nur ein JDK nötig). "
+             "Start: F5, Adresse http://localhost:8080.",
+             "Java", "java", "Web", SPRING_FILES, "src/main/java/com/example/__IDLOWER__/HelloController.java", ("git", "readme"),
+             settings={"run_cmd": "./mvnw spring-boot:run"}),
     Template("php-console", "PHP-Skript (Konsole)", "Ein PHP-Skript, das mit dem PHP-Interpreter läuft.", "PHP", "php", "Konsole",
              {"main.php": PHP_CONSOLE}, "main.php"),
     Template("php-web", "PHP-Webanwendung (eingebauter Server)", "Kleine PHP-Seite mit Formular; Start über den eingebauten PHP-Server (F5, Adresse http://127.0.0.1:8000).",
@@ -230,6 +236,8 @@ def create_project(t: Template, name: str, location: Path, options: dict):
         f = root / fill(rel)
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(fill(content), encoding="utf-8")
+        if content.startswith("#!"):
+            f.chmod(0o755)                      # Skripte (z. B. mvnw) ausführbar
         log.append(f"  + {fill(rel)}")
     if t.qt_form:
         _qt_demo(root)
@@ -258,5 +266,5 @@ def create_project(t: Template, name: str, location: Path, options: dict):
         r = subprocess.run([py, "-m", "venv", ".venv"], cwd=root, capture_output=True, text=True, timeout=180)
         log.append("  Virtuelle Umgebung .venv angelegt." if r.returncode == 0 else f"  venv fehlgeschlagen: {r.stderr.strip()}")
     log.append("Projekt erstellt.")
-    main = root / t.main if t.main else None
+    main = root / fill(t.main) if t.main else None
     return root, main, log
