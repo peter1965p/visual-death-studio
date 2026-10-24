@@ -39,6 +39,13 @@ def desktop_entry_exists() -> bool:
     return desktop_entry_path().exists() or Path(f"/usr/share/applications/{DESKTOP_ID}.desktop").exists()
 
 
+def _quote(arg: str) -> str:
+    """Argument für die Exec-Zeile einer .desktop-Datei (Leerzeichen und Sonderzeichen in Anführungszeichen)."""
+    if not any(ch in arg for ch in ' \t"\'\\><~|&;$*?#()`'):
+        return arg
+    return '"' + arg.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`") + '"'
+
+
 def install_desktop_entry() -> Path:
     """Legt Starter und Icon im Benutzerverzeichnis an (~/.local/share), damit die App im Anwendungsmenü erscheint."""
     import shutil
@@ -52,6 +59,6 @@ def install_desktop_entry() -> Path:
     entry.write_text(
         "[Desktop Entry]\nType=Application\n"
         f"Name={APP_NAME}\nComment=IDE mit Formular-Designer, Paket-Manager und Claude-Anbindung\n"
-        f"Exec={sys.executable} {root / 'run.py'}\nPath={root}\nIcon={DESKTOP_ID}\n"
+        f"Exec={_quote(sys.executable)} {_quote(str(root / 'run.py'))}\nPath={root}\nIcon={DESKTOP_ID}\n"
         f"Terminal=false\nCategories=Development;IDE;\nStartupWMClass={DESKTOP_ID}\n", encoding="utf-8")
     return entry

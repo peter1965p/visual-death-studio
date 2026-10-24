@@ -9,12 +9,14 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 
 ## Funktionen
 
-- **Formular-Designer** mit Toolbox (36 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
+- **Formular-Designer** mit Toolbox (37 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
+- **Verschachtelung und Layouts** im Designer: Controls in GroupBox, Panel und TabWidget ziehen, Layouts (vertikal, horizontal, Raster) für Formular und Container
 - **Sprachabhängige Codeausschnitte** in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung
 - **Debugger** für Python, C/C++ (gdb), Node, Java, Go (dlv) und C# (netcoredbg) mit Haltepunkten, Variablen, Überwachung, Aufrufliste und Direktfenster
 - **Test-Explorer** für pytest, unittest, node:test, Go, Cargo und dotnet
 - **Refactorings**: Umbenennen, Verweise suchen, Formatieren, Quick Actions
+- **Erstellen** erkennt CMake, Make, Cargo, Go, .NET, Maven, Gradle und npm; eigene Build-/Clean-Befehle und weitere Einstellungen unter Projekt → Eigenschaften
 - **Projekt-Assistent** inklusive „Mit Claude erstellen“
 - **Claude-Chat**, Diff-/Review-Ansicht, Git-Änderungen, Paket-Manager, Terminal
 
@@ -22,10 +24,16 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 
     git clone https://github.com/peter1965p/visual-death-studio.git
     cd visual-death-studio
-    python -m venv venv && venv/bin/pip install -r requirements.txt
-    venv/bin/python run.py
+    ./install.sh
 
-Optional: `venv/bin/python run.py --install-desktop` legt einen Starter im Anwendungsmenü an.
+Das Skript legt eine virtuelle Python-Umgebung an, installiert die Abhängigkeiten, erzeugt den Starter `visual-death-studio`
+(in `~/.local/bin`) und einen Eintrag im Anwendungsmenü. Es braucht Python 3.10+ und keine Administratorrechte; am Ende zeigt es,
+welche optionalen Werkzeuge (Compiler, Debugger, Sprachserver) fehlen. `./install.sh --help` listet die Optionen.
+
+Entfernen: `./uninstall.sh` (löscht Starter, Menüeintrag und die vom Skript angelegte Umgebung; mit `--purge` auch die Einstellungen,
+Projekte bleiben unberührt).
+
+Ohne Skript: `python -m venv venv && venv/bin/pip install -r requirements.txt && venv/bin/python run.py`.
 
 Compiler, Debugger und Sprachserver (gcc, gdb, clangd, node, go, dlv, java, dotnet, …) werden nicht mitgeliefert; die
 jeweilige Funktion ist verfügbar, sobald das Werkzeug installiert ist. Die Claude-Funktionen benötigen die lokale
