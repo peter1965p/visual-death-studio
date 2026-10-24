@@ -80,6 +80,7 @@ class OptionsDialog(QDialog):
     def _page_general(self):
         w = QWidget(); lay = QVBoxLayout(w)
         lay.addWidget(note("Alle Optionen gelten sofort für das ganze Programm. Gespeichert wird im Konfigurationsordner des Benutzers."))
+        lay.addWidget(self._bool("ui/splash", "Startbild mit Fortschrittsanzeige zeigen (beim nächsten Start)"))
         for text, slot in (("Fensterlayout zurücksetzen", self._reset_layout), ("Konfigurationsordner öffnen", self._open_config),
                            ("Einstellungen exportieren …", self._export), ("Einstellungen importieren …", self._import)):
             b = QPushButton(text); b.clicked.connect(slot); b.setFixedWidth(260); lay.addWidget(b)

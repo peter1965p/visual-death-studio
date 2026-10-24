@@ -69,8 +69,10 @@ SAMPLES = {
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, progress=None):
         super().__init__()
+        step = progress or (lambda percent, text: None)          # Startbild: Fortschritt in Prozent und Statustext
+        step(4, "Lese Einstellungen …")
         self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self.setWindowTitle("Visual Death Studio")
         self.resize(1500, 900)
@@ -87,6 +89,7 @@ class MainWindow(QMainWindow):
         self.runner = Runner(self.root / ".vds" / "bin", self)
         self.startup: Path | None = None
 
+        step(12, "Starte Sprachdienste …")
         self.lsp = LspManager(self)
         self.project = ProjectSettings()
         self.tests = TestService(self)
@@ -94,23 +97,30 @@ class MainWindow(QMainWindow):
         self.docs = Documents()
         self.docs.intel = self.lsp
         self.setCentralWidget(self.docs)
+        step(22, "Baue Fenster und Werkzeuge …")
         self._build_docks()
+        step(48, "Richte Debugger ein …")
         self.dbg = DebugController(self, dict(locals=self.p_locals, watch=self.p_watch, stack=self.p_stack, immediate=self.p_imm))
         self._after_build = None
         self._build_base = None            # Basisordner für relative Pfade in Compilermeldungen (Projekt-Build)
         self._lsp_status: dict = {}
         self._start_text = " Starten"
+        step(58, "Erzeuge Menüs und Befehle …")
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
         self._build_status()
+        step(72, "Verbinde Komponenten …")
         self._wire()
         self._autosave = QTimer(self)
         self._autosave.timeout.connect(self._autosave_tick)
         QApplication.instance().applicationStateChanged.connect(self._app_state)
         options.bus.changed.connect(self._option_changed)
+        step(80, "Wende Optionen an …")
         self._apply_options()
+        step(86, "Öffne Projekt …")
         self.set_root(self.root)
+        step(94, "Stelle letzte Sitzung wieder her …")
         self._restore_session()
         self.restoreGeometry(self.settings.value("geometry") or b"")
         if self.settings.value("state") and self.settings.value("layout_version") == LAYOUT_VERSION:
@@ -1348,9 +1358,16 @@ def main():
     app.setStyle("Fusion")
     apply_palette(app)
     app.setStyleSheet(stylesheet())
-    w = MainWindow()
+    splash = None
+    if "--no-splash" not in sys.argv and options.get("ui/splash"):
+        from .splash import SplashScreen
+        splash = SplashScreen()
+        splash.show(); splash.step(1, "Starte …")
+    w = MainWindow(progress=splash.step if splash else None)
     w._default_state = w.saveState()
     w.show()
+    if splash:
+        splash.finish(w)
     code = app.exec()
     from .web.panel import dispose_profiles
     dispose_profiles()
