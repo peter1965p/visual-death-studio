@@ -1,9 +1,9 @@
-"""Assistent „Neues Projekt erstellen“ im Stil von Visual Studio 2022 (3 Seiten)."""
+"""Assistent „Neues Projekt erstellen“ im Stil von Visual Studio 2022 (4 Seiten; Vorlagen mit Scaffold-Befehl wie Laravel laufen im Hintergrund)."""
 import re
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSettings, QSize, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout,
@@ -14,7 +14,7 @@ from ..theme import t as tc
 from ..branding import SETTINGS_APP, SETTINGS_ORG
 from ..ai.prompts import LANG_HINTS, SYSTEM_PROJECT, parse_main, project_prompt
 from ..docks.explorer import LANG_COLOR
-from .templates import TEMPLATES, Template, create_project
+from .templates import TEMPLATES, Template, create_project, finish_project, scaffold_command, scaffold_failed
 
 COLORS = {**LANG_COLOR, "claude": "#d97757"}
 ABBR = {"claude": "✦", "typescript": "TS", "vue": "Vu", "php": "PHP", "python": "Py", "c": "C", "cpp": "C++", "csharp": "C#", "rust": "Rs", "go": "Go", "javascript": "JS", "java": "Jv", "shell": "sh", "": "＋"}
@@ -46,6 +46,22 @@ def badge(lang_id: str, size=40) -> QPixmap:
     p.drawText(pm.rect(), Qt.AlignCenter, ABBR.get(lang_id, "?"))
     p.end()
     return pm
+
+
+_PHP_MODULES: set | None = None
+
+
+def _php_has(ext: str) -> bool:
+    """Ist die PHP-Erweiterung geladen? (php -m, einmal pro Sitzung)"""
+    global _PHP_MODULES
+    if _PHP_MODULES is None:
+        import subprocess
+        try:
+            out = subprocess.run(["php", "-m"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _PHP_MODULES = {l.strip().lower() for l in out.splitlines()}
+    return ext.lower() in _PHP_MODULES
 
 
 class TemplateDelegate(QStyledItemDelegate):
@@ -93,6 +109,8 @@ class NewProjectDialog(QDialog):
         self.claude.tool.connect(lambda t: self.ai_log.appendPlainText("⚙ " + t))
         self.claude.finished.connect(self._ai_finished)
         self._base = None
+        self.proc: QProcess | None = None            # laufender Scaffold-Befehl (z. B. composer create-project)
+        self._scaffold = None                        # (Zielordner, existierte vorher, Optionen, Beschreibung)
         self.back = QPushButton("Zurück"); self.next = QPushButton("Weiter"); self.next.setObjectName("primary")
         cancel = QPushButton("Abbrechen")
         self.back.clicked.connect(lambda: self._go(self.stack.currentIndex() - 1))
@@ -213,7 +231,7 @@ class NewProjectDialog(QDialog):
     # --- Seite 4: Claude arbeitet -------------------------------------------------------------
     def _page_progress(self):
         w = QWidget(); lay = QVBoxLayout(w); lay.setContentsMargins(0, 0, 0, 0)
-        t = QLabel("Claude erstellt dein Projekt …"); t.setObjectName("title"); lay.addWidget(t)
+        t = self.prog_title = QLabel("Claude erstellt dein Projekt …"); t.setObjectName("title"); lay.addWidget(t)
         self.prog_sub = QLabel("Das kann je nach Umfang eine Minute dauern."); self.prog_sub.setObjectName("sub"); lay.addWidget(self.prog_sub)
         self.bar = QProgressBar(); self.bar.setRange(0, 0); self.bar.setTextVisible(False); self.bar.setFixedHeight(6); lay.addWidget(self.bar)
         self.ai_log = QPlainTextEdit(readOnly=True); lay.addWidget(self.ai_log, 1)
@@ -248,6 +266,13 @@ class NewProjectDialog(QDialog):
             self.next.setEnabled(self.tpl is not None)
 
     def _tool_hint(self):
+        if self.tpl.scaffold:
+            missing = [x for x in (self.tpl.scaffold[0], "php") if not shutil.which(x)]
+            if missing:
+                return f"Hinweis: {', '.join(missing)} ist nicht installiert – das Projekt kann so nicht angelegt werden."
+            sqlite = "" if _php_has("pdo_sqlite") else (" Hinweis: Laravel nutzt standardmäßig SQLite – dafür fehlt PHP die Erweiterung pdo_sqlite "
+                                                         "(Arch: php-sqlite installieren und in php.ini aktivieren); Seiten ohne Datenbank laufen auch so.")
+            return "Das Projekt wird mit „composer create-project“ aus dem Netz geladen." + sqlite
         need = {"python": "python3", "c": "gcc", "cpp": "g++", "csharp": "dotnet", "rust": "rustc", "go": "go", "javascript": "node",
                 "java": "java", "shell": "bash"}.get(self.tpl.lang_id)
         if need and not shutil.which(need):
@@ -274,6 +299,8 @@ class NewProjectDialog(QDialog):
     def _create(self):
         opts = {k: c.isChecked() for k, c in self.checks.items() if k in self.tpl.options}
         loc = Path(self.location.text().strip()).expanduser()
+        if self.tpl.scaffold:
+            return self._start_scaffold(loc, opts)
         self.setCursor(Qt.WaitCursor)
         try:
             self.result_data = create_project(self.tpl, self.name.text().strip(), loc, opts)
@@ -288,15 +315,65 @@ class NewProjectDialog(QDialog):
             return self._start_ai(desc)
         self.accept()
 
+    # --- Projekte, die ein Werkzeug anlegt (composer create-project …) ---------------------------------
+    def _start_scaffold(self, loc: Path, opts: dict):
+        name = self.name.text().strip()
+        cmd = scaffold_command(self.tpl, name)
+        if not shutil.which(cmd[0]):
+            self._go(1)
+            return self.err.setText(f"'{cmd[0]}' ist nicht installiert – das Projekt kann nicht angelegt werden.")
+        root = loc / name
+        self._scaffold = (root, root.exists(), opts, self.desc.toPlainText().strip())
+        self._go(3)
+        self.prog_title.setText(f"{self.tpl.name} wird angelegt …")
+        self.prog_sub.setText(f"{' '.join(cmd[:3])} – das dauert je nach Netzwerk ein bis zwei Minuten.")
+        self.next.setEnabled(False); self.cancel.setText("Abbrechen")
+        self.ai_log.clear(); self.bar.setRange(0, 0)
+        p = self.proc = QProcess(self)
+        p.setWorkingDirectory(str(loc))
+        env = QProcessEnvironment.systemEnvironment(); env.insert("COMPOSER_NO_INTERACTION", "1")
+        p.setProcessEnvironment(env)
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        p.readyRead.connect(lambda: self.ai_log.appendPlainText(bytes(p.readAll()).decode("utf-8", "replace").rstrip()))
+        p.errorOccurred.connect(lambda e: e == QProcess.FailedToStart and self._scaffold_done(-1, QProcess.CrashExit))
+        p.finished.connect(self._scaffold_done)
+        p.start(cmd[0], cmd[1:])
+
+    def _scaffold_done(self, code, status):
+        p, self.proc = self.proc, None
+        if p is None:
+            return
+        root, existed, opts, desc = self._scaffold
+        name = self.name.text().strip()
+        if code != 0 or status != QProcess.NormalExit:
+            scaffold_failed(root, existed)
+            self.bar.setRange(0, 1); self.bar.setValue(0)
+            self.prog_title.setText("Das Projekt konnte nicht angelegt werden")
+            self.prog_sub.setText("Die Meldung steht unten. Mit „Zurück“ lässt sich der Name oder Ort ändern.")
+            self.back.setVisible(True); self.cancel.setText("Schließen")
+            return
+        log = [f"Projekt '{name}' ({self.tpl.name}) wurde in {root} erstellt…", "  " + " ".join(scaffold_command(self.tpl, name)) + " ✓"]
+        self.result_data = finish_project(self.tpl, name, root, opts, log)
+        self.settings.setValue("new_project_location", str(root.parent))
+        if desc and backend.available():
+            return self._start_ai(desc)
+        self.bar.setRange(0, 1); self.bar.setValue(1)
+        self.prog_title.setText("Projekt erstellt")
+        self.prog_sub.setText("Fertig – mit F5 startest du die Anwendung.")
+        self.next.setEnabled(True); self.cancel.setText("Schließen")
+
     def _start_ai(self, desc):
         root, main, log = self.result_data
         name = self.name.text().strip()
-        existing = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and ".git/" not in p.as_posix())
+        skip = {".git", "vendor", "node_modules", "storage", "target", "venv", ".venv", "__pycache__"}
+        existing = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and not skip & set(p.relative_to(root).parts))[:300]
         if self._is_ai():
             prompt = project_prompt(name, desc, LANG_HINTS[self.lang_combo.currentText()])
         else:
             prompt = project_prompt(name, desc, template=self.tpl.name, files=existing)
         self._go(3)
+        self.prog_title.setText("Claude erstellt dein Projekt …")
+        self.prog_sub.setText("Das kann je nach Umfang eine Minute dauern.")
         self.next.setEnabled(False); self.cancel.setText("Abbrechen")
         self.ai_log.clear(); self.bar.setRange(0, 0)
         self.claude.run(prompt, root, system=SYSTEM_PROJECT, max_turns=40)
@@ -315,12 +392,27 @@ class NewProjectDialog(QDialog):
         self.result_data = (root, new_main, log)
         self.next.setEnabled(True); self.cancel.setText("Schließen")
 
+    def _stop_scaffold(self):
+        p, self.proc = self.proc, None
+        if p is not None:
+            p.kill(); p.waitForFinished(3000)
+            root, existed, _o, _d = self._scaffold
+            scaffold_failed(root, existed)
+            return True
+        return False
+
     def _cancel(self):
+        if self._stop_scaffold():
+            self.bar.setRange(0, 1); self.bar.setValue(0)
+            self.prog_title.setText("Abgebrochen"); self.prog_sub.setText("Das angefangene Projekt wurde entfernt.")
+            self.back.setVisible(True); self.cancel.setText("Schließen")
+            return
         if self.claude.running:
             self.claude.stop()
             return
         self.reject()
 
     def reject(self):
+        self._stop_scaffold()
         self.claude.stop()
         super().reject()

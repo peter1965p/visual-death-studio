@@ -1,4 +1,5 @@
 """Projektvorlagen und Projekterzeugung. Platzhalter __NAME__ wird durch den Projektnamen ersetzt."""
+import os
 import re
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ class Template:
     form_target: str = ""        # Designer-Ziel des Start-Formulars (java-swing | react | vue); leer = keins
     form_dir: str = ""           # Ordner des Formulars relativ zum Projekt (z. B. src, components)
     settings: dict = field(default_factory=dict)   # Vorbelegung für .vds/project.json (z. B. run_cmd)
+    scaffold: tuple = ()         # Befehl, der das Projekt selbst anlegt (Platzhalter {name}; läuft im Speicherort), z. B. composer create-project
 
 
 PY_CONSOLE = 'def main() -> None:\n    print("Hallo, __NAME__!")\n\n\nif __name__ == "__main__":\n    main()\n'
@@ -138,6 +140,10 @@ TEMPLATES = [
              "Start: F5, Adresse http://localhost:8080.",
              "Java", "java", "Web", SPRING_FILES, "src/main/java/com/example/__IDLOWER__/HelloController.java", ("git", "readme"),
              settings={"run_cmd": "./mvnw spring-boot:run"}),
+    Template("laravel", "Laravel-Webanwendung (PHP, Composer)",
+             "Vollständige Laravel-Anwendung, geladen mit 'composer create-project' (Netzwerk nötig, dauert ein bis zwei Minuten). Start: F5 (php artisan serve), die Web-Vorschau öffnet sich selbst.",
+             "PHP", "php", "Web", {}, "routes/web.php", ("git",), settings={"run_cmd": "php artisan serve"},
+             scaffold=("composer", "create-project", "laravel/laravel", "{name}", "--no-interaction", "--no-ansi", "--prefer-dist")),
     Template("php-console", "PHP-Skript (Konsole)", "Ein PHP-Skript, das mit dem PHP-Interpreter läuft.", "PHP", "php", "Konsole",
              {"main.php": PHP_CONSOLE}, "main.php"),
     Template("php-web", "PHP-Webanwendung (eingebauter Server)", "Kleine PHP-Seite mit Formular; Start über den eingebauten PHP-Server (F5, Adresse http://127.0.0.1:8000).",
@@ -225,12 +231,11 @@ def create_project(t: Template, name: str, location: Path, options: dict):
     root = location / name
     if root.exists() and any(root.iterdir()):
         raise FileExistsError(f"'{root}' existiert bereits und ist nicht leer.")
-    root.mkdir(parents=True, exist_ok=True)
     log = [f"Projekt '{name}' ({t.name}) wird in {root} erstellt…"]
-    ident = re.sub(r"\W", "_", name)
-    ident = ident if not ident[0].isdigit() else "_" + ident
-    npm_name = re.sub(r"[^a-z0-9._-]", "-", name.lower()).strip("-.") or "app"
-    fill = lambda x: x.replace("__NAME__", name).replace("__IDLOWER__", npm_name if t.lang_id in ("typescript", "vue", "javascript") else ident.lower()).replace("__ID__", ident)
+    if t.scaffold:
+        return _scaffold_sync(t, name, location, root, options, log)
+    root.mkdir(parents=True, exist_ok=True)
+    fill = _filler(t, name)
     files = t.files(options) if callable(t.files) else t.files
     for rel, content in files.items():
         f = root / fill(rel)
@@ -247,6 +252,44 @@ def create_project(t: Template, name: str, location: Path, options: dict):
         log += ["  + Form1.form.json", "  + Form1_designer.py", "  + Form1.py"]
     if t.form_target:
         log += _demo_form(root, t, name)
+    return finish_project(t, name, root, options, log)
+
+
+def _filler(t: Template, name: str):
+    """Ersetzt die Platzhalter __NAME__, __IDLOWER__ und __ID__ in Dateiinhalten und -pfaden."""
+    ident = re.sub(r"\W", "_", name)
+    ident = ident if not ident[0].isdigit() else "_" + ident
+    npm_name = re.sub(r"[^a-z0-9._-]", "-", name.lower()).strip("-.") or "app"
+    return lambda x: x.replace("__NAME__", name).replace("__IDLOWER__", npm_name if t.lang_id in ("typescript", "vue", "javascript") else ident.lower()).replace("__ID__", ident)
+
+
+def scaffold_command(t: Template, name: str) -> list:
+    return [a.replace("{name}", name) for a in t.scaffold]
+
+
+def scaffold_failed(root: Path, existed: bool):
+    """Räumt einen halb angelegten Projektordner weg – nur, wenn er vor dem Aufruf nicht existierte."""
+    if not existed and root.is_dir():
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _scaffold_sync(t: Template, name: str, location: Path, root: Path, options: dict, log: list):
+    cmd = scaffold_command(t, name)
+    if not shutil.which(cmd[0]):
+        raise FileNotFoundError(f"'{cmd[0]}' ist nicht installiert.")
+    existed = root.exists()
+    location.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(cmd, cwd=location, capture_output=True, text=True, env={**os.environ, "COMPOSER_NO_INTERACTION": "1"})
+    if r.returncode != 0:
+        scaffold_failed(root, existed)
+        raise RuntimeError(f"'{' '.join(cmd[:2])}' ist fehlgeschlagen (Code {r.returncode}):\n" + (r.stderr or r.stdout)[-1500:])
+    log.append("  " + " ".join(cmd) + " ✓")
+    return finish_project(t, name, root, options, log)
+
+
+def finish_project(t: Template, name: str, root: Path, options: dict, log: list):
+    """Gemeinsamer Abschluss: Start-Befehl, README, Git (vorhandene .gitignore bleibt), venv. Rückgabe: (Projektordner, zu öffnende Datei|None, Protokoll)."""
+    fill = _filler(t, name)
     if t.settings:
         from ..project import ProjectSettings
         ProjectSettings(**t.settings).save(root)
@@ -255,7 +298,8 @@ def create_project(t: Template, name: str, location: Path, options: dict):
         (root / "README.md").write_text(f"# {name}\n\n{t.description}\n", encoding="utf-8")
         log.append("  + README.md")
     if options.get("git"):
-        (root / ".gitignore").write_text(_ignore_for(t), encoding="utf-8")
+        if not (root / ".gitignore").exists():
+            (root / ".gitignore").write_text(_ignore_for(t), encoding="utf-8")
         if shutil.which("git"):
             r = subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True, text=True)
             log.append("  Git-Repository initialisiert." if r.returncode == 0 else f"  git init fehlgeschlagen: {r.stderr.strip()}")

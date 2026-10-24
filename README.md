@@ -16,7 +16,7 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
   - **Elemente anklicken** (⌖): Details, Eltern/Kind-Navigation, „Zum Code springen“ (id, Klassen, Text werden im Projekt gesucht; Elemente aus Designer-Seiten öffnen direkt das Formular)
   - **Visuell bearbeiten** (✥): verschieben, Größe per Griff, Text per Doppelklick, Stile (Farbe, Schrift, Abstand, Rahmen …) live im Inspektor
   - **In den Quellcode übernehmen** (Strg+Alt+S): die IDE zeigt die Möglichkeiten mit Unterschied (bestehende CSS-Regel, Tailwind-Klassen, Inline-Style, neue Regel) – erst nach deiner Bestätigung wird geschrieben, mit „Rückgängig“
-- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Angular, Next.js, Nuxt 3, Java Swing, **Spring Boot** (Maven-Wrapper, nur ein JDK nötig); dazu PHP (Skript und Webanwendung mit eingebautem Server)
+- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Angular, Next.js, Nuxt 3, Java Swing, **Spring Boot** (Maven-Wrapper, nur ein JDK nötig), **Laravel** (per `composer create-project` im Assistenten); dazu PHP (Skript und Webanwendung mit eingebautem Server)
 - **Start-Befehl** pro Projekt (z. B. `npm run dev`, `php -S …`): F5 startet den Dev-Server, Umschalt+F5 beendet ihn samt Kindprozessen
 - **Sprachabhängige Codeausschnitte** in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung
@@ -41,7 +41,7 @@ Das Skript legt eine virtuelle Python-Umgebung an, installiert die Abhängigkeit
 (in `~/.local/bin`) und einen Eintrag im Anwendungsmenü. Es braucht Python 3.10+ und keine Administratorrechte; am Ende zeigt es,
 welche optionalen Werkzeuge (Compiler, Debugger, Sprachserver) fehlen. `./install.sh --help` listet die Optionen.
 
-Laravel: `composer create-project laravel/laravel meine-app`, Ordner öffnen, F5 startet `php artisan serve`, die Vorschau öffnet sich selbst. (Für SQLite braucht PHP die Erweiterung `pdo_sqlite`; auf Arch: `php-sqlite`.)
+Laravel: im Assistenten „Laravel-Webanwendung“ wählen (oder `composer create-project laravel/laravel meine-app` und Ordner öffnen), F5 startet `php artisan serve`, die Vorschau öffnet sich selbst. (Für SQLite braucht PHP die Erweiterung `pdo_sqlite`; auf Arch: `php-sqlite`.)
 
 Farbschema: Extras → Optionen → Allgemein (Neon dunkel oder Hell, wirkt nach einem Neustart).
 

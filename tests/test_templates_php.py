@@ -69,9 +69,9 @@ def test_wizard_lists_and_filters_new_templates(qapp, tmp_path):
     from vds.projects.wizard import NewProjectDialog
     dlg = NewProjectDialog(None, tmp_path)
     ids = lambda: [dlg.list.item(i).data(Qt.UserRole).id for i in range(dlg.list.count())]
-    assert {"react-vite", "vue-vite", "next", "nuxt", "angular", "java-swing", "php-web", "php-console"} <= set(ids())
+    assert {"react-vite", "vue-vite", "next", "nuxt", "angular", "java-swing", "java-spring", "laravel", "php-web", "php-console"} <= set(ids())
     dlg.f_lang.setCurrentText("PHP")
-    assert set(ids()) == {"php-console", "php-web"}
+    assert set(ids()) == {"php-console", "php-web", "laravel"}
     dlg.f_lang.setCurrentIndex(0); dlg.search.setText("nuxt")
     assert ids() == ["nuxt"]
 
