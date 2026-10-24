@@ -3,7 +3,7 @@ import re
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QRect, QSettings, QSize, Qt
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QRect, QRunnable, QSettings, QSize, QThreadPool, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout,
@@ -14,7 +14,7 @@ from ..theme import t as tc
 from ..branding import SETTINGS_APP, SETTINGS_ORG
 from ..ai.prompts import LANG_HINTS, SYSTEM_APP, SYSTEM_PROJECT, parse_main, project_prompt
 from ..docks.explorer import LANG_COLOR
-from . import apps
+from . import apps, selftest
 from .templates import BY_ID, TEMPLATES, Template, create_project, finish_project, scaffold_command, scaffold_failed
 
 COLORS = {**LANG_COLOR, "claude": "#d97757"}
@@ -65,6 +65,28 @@ def _php_has(ext: str) -> bool:
     return ext.lower() in _PHP_MODULES
 
 
+class _CheckSignals(QObject):
+    done = Signal(int, object)          # Durchlauf, Fehlerliste
+
+
+class _CheckJob(QRunnable):
+    """Selbsttest im Hintergrund, damit die Oberfläche bedienbar bleibt."""
+    def __init__(self, token, root, lang_id, template_id, imports):
+        super().__init__()
+        self.args, self.token, self.signals = (root, lang_id, template_id, imports), token, _CheckSignals()
+
+    def run(self):
+        try:
+            errs = selftest.check_project(*self.args)
+        except Exception as e:  # der Test selbst darf den Assistenten nie abstürzen lassen
+            errs = []
+            print("Selbsttest abgebrochen:", e)
+        try:
+            self.signals.done.emit(self.token, errs)
+        except RuntimeError:     # Dialog wurde inzwischen geschlossen
+            pass
+
+
 class TemplateDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return QSize(0, 72)
@@ -113,6 +135,10 @@ class NewProjectDialog(QDialog):
         self.proc: QProcess | None = None            # laufender Scaffold-Befehl (z. B. composer create-project)
         self.pip: QProcess | None = None             # pip install -r requirements.txt im neuen .venv
         self._opts: dict = {}
+        self._ai_ran = False                         # Claude hat Code geschrieben → Selbsttest sinnvoll
+        self._installed = False                      # requirements.txt wurde ins .venv installiert
+        self._fix_rounds = 0                         # wie oft Claude schon nach Testfehlern korrigieren durfte
+        self._check_token = 0                        # gültiger Durchlauf des Selbsttests (0 = keiner läuft)
         self._scaffold = None                        # (Zielordner, existierte vorher, Optionen, Beschreibung)
         self.back = QPushButton("Zurück"); self.next = QPushButton("Weiter"); self.next.setObjectName("primary")
         cancel = QPushButton("Abbrechen")
@@ -357,6 +383,7 @@ class NewProjectDialog(QDialog):
     def _create(self):
         tpl = self.eff
         opts = self._opts = {k: c.isChecked() for k, c in self.checks.items() if k in tpl.options}
+        self._ai_ran = self._installed = False; self._fix_rounds = 0; self._check_token = 0
         loc = Path(self.location.text().strip()).expanduser()
         if tpl.scaffold:
             return self._start_scaffold(loc, opts)
@@ -379,12 +406,15 @@ class NewProjectDialog(QDialog):
     # --- Python-Pakete ins neue .venv ----------------------------------------------------------------
     def _wants_install(self) -> bool:
         """Soll nach dem Anlegen (und nach Claudes Arbeit) die requirements.txt ins neue .venv installiert werden?"""
+        return not self._installed and self._pkgs_wanted()
+
+    def _pkgs_wanted(self) -> bool:
+        """Hat das neue Projekt ein .venv und eine requirements.txt mit Paketen?"""
         if not self._opts.get("venv") or not self.result_data:
             return False
         root = self.result_data[0]
-        req = root / "requirements.txt"
         try:
-            has = any(l.strip() and not l.lstrip().startswith("#") for l in req.read_text(encoding="utf-8").splitlines())
+            has = any(l.strip() and not l.lstrip().startswith("#") for l in (root / "requirements.txt").read_text(encoding="utf-8").splitlines())
         except OSError:
             return False
         return has and (root / ".venv/bin/python").is_file()
@@ -411,8 +441,11 @@ class NewProjectDialog(QDialog):
             return
         root, main, log = self.result_data
         ok = code == 0 and status == QProcess.NormalExit
+        self._installed = ok
         log.append("  Python-Pakete aus requirements.txt installiert." if ok else
                    "  Pakete konnten nicht installiert werden – im Paket-Manager oder mit 'pip install -r requirements.txt' im .venv nachholen.")
+        if self._ai_ran:
+            return self._start_check()                     # Claude hat Code geschrieben: jetzt prüfen
         self.bar.setRange(0, 1); self.bar.setValue(1 if ok else 0)
         self.prog_title.setText("Projekt erstellt" if ok else "Projekt erstellt – Pakete fehlen noch")
         self.prog_sub.setText("Fertig – mit F5 startest du die Anwendung." if ok else "Die Installation ist fehlgeschlagen (Meldung unten). Das Projekt lässt sich trotzdem öffnen.")
@@ -493,8 +526,59 @@ class NewProjectDialog(QDialog):
             self.ai_log.appendPlainText("\n⚠ " + result)
             log += [f"Claude-Fehler: {result}"]
         self.result_data = (root, new_main, log)
+        if ok:
+            self._ai_ran = True
         if self._wants_install():
             return self._start_install()
+        if ok:
+            return self._start_check()
+        self.next.setEnabled(True); self.cancel.setText("Schließen")
+
+    # --- Selbsttest nach Claudes Arbeit ------------------------------------------------------------------
+    def _start_check(self):
+        root, _main, _log = self.result_data
+        self._check_token += 1
+        token = self._check_token
+        self._go(3)
+        self.prog_title.setText("Der Code wird geprüft …")
+        self.prog_sub.setText("Selbsttest: Syntax und Importe – Fehler gibt der Assistent an Claude zur Korrektur zurück.")
+        self.next.setEnabled(False); self.cancel.setText("Überspringen")
+        self.ai_log.appendPlainText("\n$ Selbsttest")
+        self.bar.setRange(0, 0)
+        imports = self._installed or not self._pkgs_wanted()           # ohne installierte Pakete sind Importfehler nur Folgefehler
+        job = _CheckJob(token, root, self.eff.lang_id, self.eff.id, imports)
+        self._job = job
+        job.signals.done.connect(self._check_done)
+        QThreadPool.globalInstance().start(job)
+
+    def _check_done(self, token, errors):
+        if token != self._check_token:
+            return                                                      # übersprungen oder überholt
+        self._check_token = 0
+        root, main, log = self.result_data
+        name = self.name.text().strip()
+        if not errors:
+            self.ai_log.appendPlainText("✓ Selbsttest bestanden – keine Fehler gefunden.")
+            log.append("  Selbsttest bestanden." if not self._fix_rounds else f"  Selbsttest bestanden (nach {self._fix_rounds} Korrektur(en) durch Claude).")
+            return self._final_ui("Projekt erstellt", "Fertig – der Selbsttest hat keine Fehler gefunden. Mit F5 startest du die Anwendung.", True)
+        for e in errors:
+            self.ai_log.appendPlainText("✗ " + e)
+        if self._fix_rounds < 2 and backend.available():
+            self._fix_rounds += 1
+            self.prog_title.setText(f"Claude korrigiert die Fehler (Versuch {self._fix_rounds} von 2) …")
+            self.prog_sub.setText(f"{len(errors)} Fehler gefunden. Danach prüft der Assistent erneut.")
+            self.cancel.setText("Abbrechen"); self.bar.setRange(0, 0)
+            self.ai_log.appendPlainText("\n⚙ Claude bekommt die Fehler zur Korrektur …")
+            log.append(f"  Selbsttest: {len(errors)} Fehler gefunden, Claude korrigiert (Versuch {self._fix_rounds}).")
+            self.claude.run(selftest.fix_prompt(name, errors), root, system=SYSTEM_APP if self._is_app() else SYSTEM_PROJECT, max_turns=40)
+            return
+        log += ["  Selbsttest: noch offene Fehler:"] + [f"    {e}" for e in errors[:5]]
+        self._final_ui("Projekt erstellt – der Selbsttest meldet noch Fehler",
+                       "Die Fehler stehen oben im Protokoll. Du kannst sie im Claude-Chat der IDE beheben lassen – das Projekt lässt sich trotzdem öffnen.", False)
+
+    def _final_ui(self, title: str, sub: str, ok: bool):
+        self.bar.setRange(0, 1); self.bar.setValue(1 if ok else 0)
+        self.prog_title.setText(title); self.prog_sub.setText(sub)
         self.next.setEnabled(True); self.cancel.setText("Schließen")
 
     def _stop_scaffold(self):
@@ -515,6 +599,10 @@ class NewProjectDialog(QDialog):
         return True
 
     def _cancel(self):
+        if self._check_token:                                           # Selbsttest läuft: überspringen
+            self._check_token = 0
+            self.result_data[2].append("  Selbsttest übersprungen.")
+            return self._final_ui("Projekt erstellt", "Der Selbsttest wurde übersprungen.", True)
         if self._stop_install():
             self.bar.setRange(0, 1); self.bar.setValue(0)
             self.prog_title.setText("Projekt erstellt – Pakete fehlen noch")
@@ -532,6 +620,7 @@ class NewProjectDialog(QDialog):
         self.reject()
 
     def reject(self):
+        self._check_token = 0
         self._stop_install()
         self._stop_scaffold()
         self.claude.stop()
