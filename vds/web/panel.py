@@ -1,5 +1,6 @@
 """Web-Vorschau: eingebetteter Browser (QtWebEngine) mit Adressleiste, Geräte-Größen, Zoom und Elementauswahl/-bearbeitung."""
 import json
+import weakref
 
 from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
@@ -9,11 +10,15 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushB
 from .page import PreviewPage
 
 _PROFILES: list = []
+_PANELS: "weakref.WeakSet" = weakref.WeakSet()
 
 
 def dispose_profiles():
     """Profile erst nach allen Seiten freigeben (beim Beenden der Anwendung aufrufen)."""
     from shiboken6 import delete, isValid
+    for panel in list(_PANELS):                       # noch lebende Vorschau-Fenster zuerst abbauen (Seite vor Profil)
+        if isValid(panel):
+            panel.shutdown()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     while _PROFILES:
         p = _PROFILES.pop()
@@ -40,6 +45,7 @@ class PreviewPanel(QWidget):
         # eigenes Profil (User-Agent der Geräte-Vorschau ändert nichts anderswo); gehört der Anwendung, damit es erst nach der Seite zerstört wird
         self.profile = QWebEngineProfile(QCoreApplication.instance())
         _PROFILES.append(self.profile)
+        _PANELS.add(self)
         self.page = PreviewPage(self.profile, self)
         self.view = QWebEngineView()
         self.view.setPage(self.page)
