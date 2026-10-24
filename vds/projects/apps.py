@@ -58,10 +58,13 @@ APPS = [
         "Summe mit Mehrwertsteuer), Kasse mit Adressformular, Bestellbestätigung mit Bestellnummer. Zahlung nur als Platzhalter „Rechnung“ (keine echte Zahlungsanbindung). "
         "Admin-Bereich mit Anmeldung (Beispielpasswort in der README): Produkte und Kategorien verwalten, Bestellungen ansehen und den Status ändern (offen, bezahlt, versandt). "
         "Lege etwa zwölf Beispielprodukte in drei Kategorien an (Bilder als einfache farbige Platzhalter)."),
-    App("website", "Unternehmens-Website", "Startseite, Leistungen, Team, Kontaktformular", WEB,
+    App("website", "Unternehmens-Website mit Backend", "Startseite, Leistungen, Team, Kontaktformular und Verwaltungsbereich", WEB,
         "Baue eine moderne Unternehmens-Website für eine fiktive Firma (nimm den Projektnamen als Firmennamen). Seiten: Startseite mit großem Kopfbereich und Aufruf zum Handeln, Leistungen, "
         "Über uns mit Team, Referenzen/Kundenstimmen, Kontakt mit Formular (Eingaben prüfen und speichern bzw. bestätigen), Impressum und Datenschutz als Platzhaltertexte. "
-        "Responsive für Handy und Desktop, durchgehende Navigation und Fußzeile."),
+        "Responsive für Handy und Desktop, durchgehende Navigation und Fußzeile. "
+        "Backend: Verwaltungsbereich unter /admin mit Anmeldung (ein Admin-Benutzer, Beispielpasswort in der README). Dort pflegt man Leistungen, Team, Referenzen und die Texte der Startseite "
+        "(anlegen, bearbeiten, löschen, Reihenfolge) und sieht die eingegangenen Kontaktanfragen (Liste, Details, als gelesen markieren, löschen). Die öffentliche Seite liest alle Inhalte aus dem Backend. "
+        "Lege Beispielinhalte an, damit die Seite sofort gefüllt ist."),
     App("access", "Datenbank-Anwendung (MS-Access-Stil)", "Tabellen, Formulare, Abfragen und Berichte", ("py-qt",),
         "Baue eine Desktop-Datenbankanwendung im Stil von Microsoft Access mit SQLite. Funktionen: Tabellen anlegen und Spalten festlegen (Name, Typ, Pflichtfeld), Daten in einer "
         "bearbeitbaren Tabellenansicht pflegen, Formularansicht für einen Datensatz mit Blättern (erster/vorheriger/nächster/letzter), Abfragen mit SQL-Editor und Ergebnistabelle, "

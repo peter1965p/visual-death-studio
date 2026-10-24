@@ -104,6 +104,60 @@ def php_syntax(root: Path) -> list:
     return errs
 
 
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+SQLITE_INI = "extension=pdo_sqlite\nextension=sqlite3\n"
+
+
+def php_env(root: Path):
+    """Umgebung, in der PHP SQLite kann. Ist pdo_sqlite nicht geladen, aber installiert, wird es über eine eigene ini-Datei im Projekt (.vds/php)
+    zugeschaltet – ohne die php.ini des Systems anzufassen – und der Start-Befehl (F5) entsprechend angepasst. None = nicht möglich."""
+    php = shutil.which("php")
+    if not php:
+        return None
+    if "pdo_sqlite" in subprocess.run([php, "-m"], capture_output=True, text=True, timeout=30).stdout.lower():
+        return dict(os.environ)
+    ext = subprocess.run([php, "-r", "echo ini_get('extension_dir');"], capture_output=True, text=True, timeout=30).stdout.strip()
+    if not (ext and (Path(ext) / "pdo_sqlite.so").is_file() and (Path(ext) / "sqlite3.so").is_file()):
+        return None
+    ini_dir = root / ".vds" / "php"
+    ini_dir.mkdir(parents=True, exist_ok=True)
+    (ini_dir / "10-sqlite.ini").write_text(SQLITE_INI, encoding="utf-8")
+    _use_ini_in_run_cmd(root)
+    return {**os.environ, "PHP_INI_SCAN_DIR": f":{ini_dir}"}
+
+
+def _use_ini_in_run_cmd(root: Path):
+    from ..project import ProjectSettings
+    ps = ProjectSettings.load(root)
+    if ps.run_cmd.startswith("php ") and "PHP_INI_SCAN_DIR" not in ps.run_cmd:
+        ps.run_cmd = 'PHP_INI_SCAN_DIR=":$PWD/.vds/php" ' + ps.run_cmd
+        ps.save(root)
+
+
+def _tail(text: str, lines: int = 12) -> str:
+    return "\n".join(ANSI.sub("", text).strip().splitlines()[-lines:])
+
+
+def laravel_runtime(root: Path) -> list:
+    """Laravel: Datenbank einrichten (migrate:fresh --seed) und die Tests des Projekts ausführen."""
+    php = shutil.which("php")
+    if not php or not (root / "artisan").is_file() or not (root / "database" / "migrations").is_dir():
+        return []
+    env = php_env(root)
+    if env is None:
+        return []                                              # ohne SQLite lässt sich die Datenbank hier nicht prüfen
+    errs = []
+    r = subprocess.run([php, "artisan", "migrate:fresh", "--seed", "--force", "--no-ansi"], cwd=root, capture_output=True, text=True, timeout=180, env=env)
+    if r.returncode != 0:
+        return ["Datenbank einrichten schlägt fehl ('php artisan migrate:fresh --seed'):\n" + _tail(r.stderr + "\n" + r.stdout)]
+    if (root / "tests").is_dir():
+        r = subprocess.run([php, "artisan", "test", "--no-ansi"], cwd=root, capture_output=True, text=True, timeout=300, env=env)
+        out = r.stdout + "\n" + r.stderr
+        if r.returncode != 0 and not re.search(r'"result"\s*:\s*"passed"', out):
+            errs.append("Die Tests des Projekts schlagen fehl ('php artisan test'):\n" + _tail(out, 20))
+    return errs
+
+
 def java_compile(root: Path) -> list:
     javac = shutil.which("javac")
     files = _files(root, ".java")
@@ -139,6 +193,8 @@ def check_project(root: Path, lang_id: str = "", template_id: str = "", imports:
             errs = python_imports(root, own) if own else python_imports(root, sys.executable, ignore_missing=True)
     elif kind == "php":
         errs = php_syntax(root)
+        if not errs and imports:
+            errs = laravel_runtime(root)
     elif kind == "java":
         errs = java_compile(root)
     return errs[:MAX_ERRORS]

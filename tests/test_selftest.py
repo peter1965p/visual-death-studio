@@ -144,3 +144,58 @@ def test_check_can_be_skipped(dlg, tmp_path, monkeypatch):
     assert dlg.cancel.text() == "Schließen" and "übersprungen" in dlg.prog_sub.text() and dlg.next.isEnabled()
     QTest.qWait(1300)                                                                           # spätes Ergebnis darf nichts mehr ändern
     assert "übersprungen" in dlg.prog_sub.text() and len(dlg.prompts) == 1
+
+
+# --- Laravel: Datenbank und Tests zur Laufzeit ------------------------------------------------------------
+FAKE_ARTISAN = """<?php
+$cmd = $argv[1] ?? '';
+if ($cmd === 'migrate:fresh') { if (file_exists(__DIR__.'/fail-migrate')) { fwrite(STDERR, "SQLSTATE[HY000]: General error: 1 no such table: kunden\\n"); exit(1); } echo "migriert\\n"; exit(0); }
+if ($cmd === 'test') { if (file_exists(__DIR__.'/fail-test')) { echo "FAILED  Tests\\\\Feature\\\\ContactTest > sendet\\n"; exit(1); } echo "PASS\\n"; exit(0); }
+"""
+
+
+def laravel_like(tmp_path):
+    write(tmp_path, "composer.json", "{}")
+    write(tmp_path, "artisan", FAKE_ARTISAN)
+    write(tmp_path, "database/migrations/x.php", "<?php\n")
+    write(tmp_path, "tests/ExampleTest.php", "<?php\n")
+    write(tmp_path, ".vds/project.json", '{"run_cmd": "php artisan serve"}')
+    return tmp_path
+
+
+@pytest.mark.skipif(not shutil.which("php"), reason="php fehlt")
+def test_laravel_runtime_reports_migration_and_test_failures(tmp_path):
+    root = laravel_like(tmp_path)
+    if st.php_env(root) is None:
+        pytest.skip("PHP hat kein SQLite")
+    assert st.check_project(root, "php", "laravel") == []
+    (root / "fail-migrate").write_text("")
+    errs = st.check_project(root, "php", "laravel")
+    assert len(errs) == 1 and "migrate:fresh" in errs[0] and "no such table: kunden" in errs[0]
+    (root / "fail-migrate").unlink(); (root / "fail-test").write_text("")
+    errs = st.check_project(root, "php", "laravel")
+    assert len(errs) == 1 and "php artisan test" in errs[0] and "ContactTest" in errs[0]
+
+
+@pytest.mark.skipif(not shutil.which("php"), reason="php fehlt")
+def test_sqlite_is_enabled_via_project_ini_and_run_command_follows(tmp_path):
+    import json
+    root = laravel_like(tmp_path)
+    env = st.php_env(root)
+    if env is None:
+        pytest.skip("PHP hat kein SQLite")
+    if "PHP_INI_SCAN_DIR" not in env:
+        pytest.skip("pdo_sqlite ist hier schon geladen")
+    assert (root / ".vds/php/10-sqlite.ini").read_text() == st.SQLITE_INI                        # php.ini des Systems bleibt unberührt
+    assert json.loads((root / ".vds/project.json").read_text())["run_cmd"] == 'PHP_INI_SCAN_DIR=":$PWD/.vds/php" php artisan serve'
+    st.php_env(root)                                                                              # zweiter Aufruf ändert nichts mehr
+    assert json.loads((root / ".vds/project.json").read_text())["run_cmd"].count("PHP_INI_SCAN_DIR") == 1
+    import subprocess
+    out = subprocess.run(["php", "-m"], env=env, capture_output=True, text=True).stdout.lower()
+    assert "pdo_sqlite" in out
+
+
+def test_laravel_runtime_skipped_for_plain_php(tmp_path):
+    write(tmp_path, "composer.json", "{}")
+    write(tmp_path, "index.php", "<?php echo 1;\n")
+    assert st.laravel_runtime(tmp_path) == []
