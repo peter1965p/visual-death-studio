@@ -10,7 +10,7 @@ import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication im
 
 from PySide6.QtCore import QCoreApplication, QSettings, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
-from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
                                QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
@@ -18,6 +18,7 @@ from .build.languages import LANGS, lang_for, parse_problems
 from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
+from .ui import startpage
 from .web import devserver
 from .web.inspector import WebInspector
 from .web.panel import PreviewPanel
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
         self.chat = ChatPanel()
         self.preview = PreviewPanel()
         self.inspector = WebInspector(self.preview)
+        self.start = startpage.StartPage()
         self.changes = ChangesPanel()
         self.packages = PackagePanel()
         self.output, self.errors, self.bps = OutputPane(), ErrorList(), Breakpoints()
@@ -268,6 +270,7 @@ class MainWindow(QMainWindow):
             testcancel=A("Testlauf abbrechen", self.tests.cancel),
             pkgs=A("Paket-Manager", self.open_packages, "Ctrl+Alt+P"),
             options=A("Optionen…", self.show_options, "Ctrl+,"),
+            startpage=A("Startseite", self.show_start_page, "Ctrl+Shift+H"),
             webopen=A("Web-Vorschau öffnen", self.open_preview, "Ctrl+Alt+W"),
             webreload=A("Web-Vorschau neu laden", lambda: self.preview.reload(), "Ctrl+Alt+R"),
             webpick=A("Web-Element auswählen", lambda: (self.open_preview(), self.preview.set_mode("pick")), "Ctrl+Alt+E"),
@@ -308,7 +311,10 @@ class MainWindow(QMainWindow):
                 else:
                     m.addAction(it)
             return m
-        menu("&Datei", ["NEU", a["openfolder"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
+        datei = menu("&Datei", ["NEU", a["openfolder"], None, a["startpage"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
+        self.m_recent = QMenu("Zuletzt geöffnete Projekte", datei)
+        self.m_recent.aboutToShow.connect(self._fill_recent)
+        datei.insertMenu(a["startpage"], self.m_recent)
         menu("&Bearbeiten", [a["undo"], a["redo"], None, a["cut"], a["copy"], a["paste"], None, a["selall"], None, a["find"], a["goto"], a["gotodef"], a["findrefs"], None, a["rename"], a["quickact"], a["fmtdoc"], a["comment"], None, a["aicomplete"]])
         v = menu("&Ansicht", [])
         for d in self.all_docks:
@@ -338,7 +344,7 @@ class MainWindow(QMainWindow):
         t.addSeparator()
         t.addAction(self._act("Terminal öffnen", lambda: (self.d_terminal.show(), self.d_terminal.raise_())))
         menu("&Fenster", [a["nextdoc"], a["prevdoc"], a["closeall"], None, a["reset"]])
-        menu("&Hilfe", [a["gettingstarted"], a["shortcuts"], a["toolcheck"], None, a["website"], a["reportbug"], a["license"], a["configdir"], None, a["about"]])
+        menu("&Hilfe", [a["startpage"], a["gettingstarted"], a["shortcuts"], a["toolcheck"], None, a["website"], a["reportbug"], a["license"], a["configdir"], None, a["about"]])
 
     def _build_toolbar(self):
         tb = QToolBar("Standard", self)
@@ -403,6 +409,11 @@ class MainWindow(QMainWindow):
         self.docs.saved.connect(lambda d: d.kind == "code" and self.lsp.did_save(d.path))
         self.docs.saved.connect(self._form_saved)
         self.docs.saved.connect(self._web_saved)
+        s = self.start
+        s.openProject.connect(self.open_recent); s.newProject.connect(self.new_project); s.openFolder.connect(self.open_folder)
+        s.newForm.connect(self.new_form); s.openPreview.connect(self.open_preview); s.openOptions.connect(self.show_options)
+        s.checkTools.connect(self.check_tools); s.openHelp.connect(self.getting_started)
+        s.showOnStartChanged.connect(lambda on: options.set("ui/start_page", on))
         self._dev_buf, self._dev_url_done = "", False
         self.runner.output.connect(self._scan_dev_url)
         self.runner.busyChanged.connect(lambda busy: busy and (setattr(self, "_dev_buf", ""), setattr(self, "_dev_url_done", False)))
@@ -518,6 +529,38 @@ class MainWindow(QMainWindow):
     def show_options(self):
         from .ui.options_dialog import OptionsDialog
         OptionsDialog(self).exec()
+
+    # --- Startseite -------------------------------------------------------------------------------------
+    def show_start_page(self):
+        self.start.refresh()
+        self.start.show_on_start.blockSignals(True); self.start.show_on_start.setChecked(options.get("ui/start_page")); self.start.show_on_start.blockSignals(False)
+        self.docs.show_page(self.start, "Startseite")
+
+    def maybe_show_start_page(self):
+        """Beim Programmstart: Startseite zeigen, wenn die Option an ist und keine Dateien der letzten Sitzung geöffnet wurden."""
+        if options.get("ui/start_page") and self.docs.count() == 0:
+            self.show_start_page()
+
+    def open_recent(self, path: str):
+        p = Path(path)
+        if not p.is_dir():
+            startpage.forget(path); self.start.refresh()
+            return self.statusBar().showMessage(f"Der Ordner existiert nicht mehr: {path}", 6000)
+        if p.resolve() != self.root.resolve():
+            self._save_session()
+            if not self.docs.close_all():
+                return
+            self.set_root(p)
+            self._restore_session()
+        self.explorer.setFocus()
+
+    def _fill_recent(self):
+        self.m_recent.clear()
+        items = startpage.load_recent()[:8]
+        for i in items:
+            self.m_recent.addAction(f"{i['name']}   –   {i['path']}", lambda p=i["path"]: self.open_recent(p))
+        if not items:
+            self.m_recent.addAction("(noch keine)").setEnabled(False)
 
     # --- Web-Vorschau -----------------------------------------------------------------------------------
     def open_preview(self):
@@ -647,6 +690,7 @@ class MainWindow(QMainWindow):
         self.runner.build_dir = path / ".vds" / "bin"
         self.chat.set_root(path)
         self.inspector.set_root(path)
+        startpage.remember(path)
         last = self.settings.value(f"web/url/{path}")
         if last and not self.preview.current_url():
             self.preview.url.setText(str(last))
@@ -1374,6 +1418,7 @@ def main():
     w = MainWindow(progress=splash.step if splash else None)
     w._default_state = w.saveState()
     w.show()
+    w.maybe_show_start_page()
     if splash:
         splash.finish(w)
     code = app.exec()

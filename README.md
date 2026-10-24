@@ -26,6 +26,8 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 - **Erstellen** erkennt CMake, Make, Cargo, Go, .NET, Maven, Gradle und npm; eigene Build-/Clean-Befehle und weitere Einstellungen unter Projekt → Eigenschaften
 - **Projekt-Assistent** inklusive „Mit Claude erstellen“
 - **Claude-Chat und -Vervollständigung** wahlweise über die lokale Claude-Code-CLI **oder mit eigenem API-Schlüssel** (Extras → Optionen → Claude; Agent mit Dateiwerkzeugen im Projektordner, Modellwahl, Verbindungstest)
+- **Startseite** (Strg+Umschalt+H, erscheint beim Start): zuletzt geöffnete Projekte mit erkanntem Typ (Laravel, React, Vue, Angular, Python …), Schnellaktionen für neues Projekt, Ordner öffnen, Designer und Web-Vorschau
+- **Farbschemata:** Neon (dunkel) und Hell
 - **Optionen** (Strg+,): Editor (Tab-Breite, Zeilenumbruch, Leerraum, Autospeichern), IntelliSense, Designer-Raster, Claude-Anbieter, Export/Import
 - Diff-/Review-Ansicht, Git-Änderungen, Paket-Manager, Terminal
 

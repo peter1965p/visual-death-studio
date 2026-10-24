@@ -159,9 +159,25 @@ class Documents(QTabWidget):
                 d.save()
                 self.saved.emit(d)
 
+    def show_page(self, widget, title: str):
+        """Dokumentunabhängige Seite (Startseite) als Tab vorne anzeigen; es gibt höchstens eine."""
+        if getattr(self, "page", None) is not None and self.indexOf(self.page) >= 0:
+            self.setCurrentWidget(self.page)
+            return self.page
+        self.page = widget
+        self.insertTab(0, widget, title)
+        self.setCurrentIndex(0)
+        return widget
+
     def close_tab(self, index: int) -> bool:
         view = self.widget(index)
-        doc = next(d for d in self.docs.values() if d.view is view)
+        doc = next((d for d in self.docs.values() if d.view is view), None)
+        if doc is None:                                  # Startseite o. Ä.: kein Dokument, einfach schließen
+            self.removeTab(index)
+            if view is getattr(self, "page", None):
+                self.page = None
+            view.deleteLater()
+            return True
         if doc.modified:
             r = QMessageBox.question(self, "Visual Death Studio", f"Änderungen an '{doc.path.name}' speichern?",
                                      QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
