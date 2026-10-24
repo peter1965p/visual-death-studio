@@ -27,7 +27,9 @@ TECH_NOTES = {
     "angular": "Technik: Angular (eigenständige Komponenten, TypeScript). Reines Frontend: Daten und Anmeldung in Services mit localStorage; Seitenwechsel mit dem Angular-Router, "
                "falls @angular/router in package.json steht, sonst mit einer einfachen eigenen Lösung. Du kannst nichts installieren: nutze nur die Pakete aus package.json.",
     "py-qt": "Technik: Python mit PySide6 (QtWidgets, bei Bedarf QtSql mit SQLite oder QtWebEngine). Nur Bibliotheken, die in requirements.txt stehen oder zur Standardbibliothek "
-             "gehören. Gliedere den Code in ein Paket (nicht alles in main.py); Start mit 'python main.py'. Gestalte die Oberfläche selbst im Code.",
+             "gehören. Gliedere den Code in ein Paket (nicht alles in main.py); Start mit 'python main.py'. Gestalte die Oberfläche selbst im Code. "
+             "Achtung PySide6: QFileSystemModel und QFileIconProvider liegen in PySide6.QtWidgets (nicht QtGui); QAction und QShortcut in PySide6.QtGui; "
+             "importiere nur Namen, die es dort wirklich gibt.",
     "java-swing": "Technik: Java Swing, nur JDK-Standardbibliothek ohne Fremdpakete. Weitere Klassen dürfen als eigene .java-Dateien im Projektordner liegen; "
                   "gestartet wird Form1.java mit 'java Form1.java'.",
 }
