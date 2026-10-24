@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..designer import codegen
 from .maui_gtk import maui_gtk_files
-from .web_templates import DEV, NEXT_FILES, NUXT_FILES, PHP_CONSOLE, PHP_WEB, REACT_FILES, VUE_FILES
+from .web_templates import ANGULAR_FILES, DEV, NEXT_FILES, NUXT_FILES, PHP_CONSOLE, PHP_WEB, REACT_FILES, VUE_FILES
 
 GITIGNORE = {
     "python": ".venv/\n__pycache__/\n*.pyc\n.env\n.vds/\n",
@@ -125,6 +125,10 @@ TEMPLATES = [
     Template("nuxt", "Nuxt 3 (Vue, TypeScript, mit Designer)",
              "Nuxt-3-App; Form1 (Designer) liegt in components/ und wird automatisch importiert. Start: F5.",
              "TypeScript", "vue", "Web", NUXT_FILES, "components/Form1.form.json", ("git", "readme"), form_target="vue", form_dir="components", settings={"run_cmd": DEV}),
+    Template("angular", "Angular (eigenständige Komponenten, TypeScript, mit Designer)",
+             "Angular-App mit Standalone-Komponenten; Form1 (Designer) liegt in src/app und wird in der App-Komponente eingebunden. Start: F5 (npm start).",
+             "TypeScript", "typescript", "Web", ANGULAR_FILES, "src/app/Form1.form.json", ("git", "readme"), form_target="angular", form_dir="src/app",
+             settings={"run_cmd": "[ -d node_modules ] || npm install; npm start"}),
     Template("java-swing", "Java-Fensteranwendung (Swing, mit Designer)",
              "Swing-Fenster mit visuellem Formular (Form1): Controls und Layouts im Designer, Ereignisse als überschreibbare Methoden. Start: F5 (java Form1.java).",
              "Java", "java", "Desktop", {}, "Form1.form.json", ("git", "readme"), form_target="java-swing"),

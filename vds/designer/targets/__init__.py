@@ -11,9 +11,10 @@ TARGETS = {
     "java-swing": ("Java – Swing", ".java", swing.SUPPORTED),
     "react": ("React + TypeScript (.tsx)", ".tsx", web.SUPPORTED),
     "vue": ("Vue 3 (.vue)", ".vue", web.SUPPORTED),
+    "angular": ("Angular (eigenständige Komponente, .ts)", ".component.ts", web.SUPPORTED),
 }
 LABELS = {i: t[0] for i, t in TARGETS.items()}
-WEB = ("react", "vue")
+WEB = ("react", "vue", "angular")
 
 
 def target_of(model: dict) -> str:
@@ -29,6 +30,8 @@ def user_file(form_path: Path, model: dict) -> Path:
     t, stem = target_of(model), stem_of(form_path)
     if t == "java-swing":
         return form_path.parent / f"{swing.names(stem)[0]}.java"
+    if t == "angular":
+        return form_path.parent / web.angular_names(stem)[0]
     return form_path.parent / f"{stem}{TARGETS[t][1]}"
 
 

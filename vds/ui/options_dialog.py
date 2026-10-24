@@ -13,7 +13,8 @@ from .. import options
 from ..ai import api, keystore
 from ..ai.completion import MODELS
 
-CATEGORIES = ["Allgemein", "Text-Editor", "IntelliSense", "Designer", "Claude"]
+CATEGORIES = ["Allgemein", "Text-Editor", "IntelliSense", "Designer", "Web-Vorschau", "Claude"]
+RELOAD = {"ohne-hmr": "Nur bei Seiten ohne Hot-Reload (z. B. PHP)", "immer": "Immer", "nie": "Nie"}
 EFFORT_LABELS = {"": "(Standard des Modells)", "low": "low – schnell", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max – am gründlichsten"}
 
 
@@ -33,7 +34,7 @@ class OptionsDialog(QDialog):
         self.nav = QListWidget(); self.nav.setFixedWidth(170)
         self.nav.addItems(CATEGORIES)
         self.pages = QStackedWidget()
-        for build in (self._page_general, self._page_editor, self._page_intellisense, self._page_designer, self._page_claude):
+        for build in (self._page_general, self._page_editor, self._page_intellisense, self._page_designer, self._page_web, self._page_claude):
             self.pages.addWidget(build())
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.setCurrentRow(0)
@@ -116,6 +117,18 @@ class OptionsDialog(QDialog):
         form = QFormLayout(); form.addRow("Rastergröße", self._int("designer/grid", " px")); lay.addLayout(form)
         lay.addWidget(self._bool("designer/show_grid", "Punktraster anzeigen"))
         lay.addWidget(self._bool("designer/snap", "Controls an Kanten und Mitten anderer Controls einrasten lassen (Fanglinien)"))
+        lay.addStretch()
+        return w
+
+    def _page_web(self):
+        from ..web.panel import DEVICES
+        w = QWidget(); lay = QVBoxLayout(w)
+        lay.addWidget(self._bool("web/auto_open", "Vorschau automatisch öffnen, sobald ein Dev-Server eine Adresse meldet (npm run dev, php -S …)"))
+        form = QFormLayout()
+        form.addRow("Neu laden beim Speichern", self._combo("web/auto_reload", RELOAD))
+        form.addRow("Standard-Gerät", self._combo("web/device", list(DEVICES)))
+        lay.addLayout(form)
+        lay.addWidget(note("Ungespeicherte visuelle Änderungen in der Vorschau werden nie durch ein automatisches Neuladen verworfen."))
         lay.addStretch()
         return w
 

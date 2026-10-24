@@ -35,7 +35,7 @@ def test_options_menu_entry_exists(win):
 def test_dialog_loads_applies_and_resets(win):
     options.set("editor/tab_width", 2)
     dlg = OptionsDialog(win)
-    assert dlg.fields["editor/tab_width"][0].value() == 2 and dlg.nav.count() == 5
+    assert dlg.fields["editor/tab_width"][0].value() == 2 and dlg.nav.count() == 6
     dlg.fields["editor/tab_width"][0].setValue(6)
     dlg.fields["editor/word_wrap"][0].setChecked(True)
     dlg.apply()

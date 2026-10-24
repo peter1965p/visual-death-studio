@@ -89,9 +89,9 @@ def tsc(webtools, source: str) -> str:
 
 # --- Zielverwaltung --------------------------------------------------------------------------------
 def test_target_registry_and_user_files(tmp_path):
-    assert set(targets.TARGETS) == {"python-qt", "java-swing", "react", "vue"}
+    assert set(targets.TARGETS) == {"python-qt", "java-swing", "react", "vue", "angular"}
     f = tmp_path / "Form-1.form.json"
-    for t, name in (("python-qt", "Form-1.py"), ("java-swing", "Form_1.java"), ("react", "Form-1.tsx"), ("vue", "Form-1.vue")):
+    for t, name in (("python-qt", "Form-1.py"), ("java-swing", "Form_1.java"), ("react", "Form-1.tsx"), ("vue", "Form-1.vue"), ("angular", "form-1.component.ts")):
         assert targets.user_file(f, {"target": t}).name == name
     assert targets.target_of({}) == "python-qt" and targets.target_of({"target": "cobol"}) == "python-qt"        # alte Dateien und Unsinn → Python/Qt
     assert targets.supports({"target": "react"}, "Button") and not targets.supports({"target": "react"}, "FontDialog")
@@ -363,3 +363,61 @@ def test_toolbox_dims_controls_the_target_cannot_generate(qapp):
     tb.set_target("python-qt")
     assert "nicht verfügbar" not in find("FontDialog").toolTip(0)
     tb.set_target("")
+
+
+# --- Angular -------------------------------------------------------------------------------------------------------
+def test_angular_component_structure():
+    src = web.angular_source(sample("angular"), "Form1Component", "app-form1")
+    assert "import { Component, EventEmitter, Output } from '@angular/core';" in src and "selector: 'app-form1'," in src and "export class Form1Component {" in src
+    assert "@Output() button1Clicked = new EventEmitter<void>();" in src and "@Output() checkBox1Toggled = new EventEmitter<boolean>();" in src
+    assert "@Output() numericUpDown1ValueChanged = new EventEmitter<number>();" in src and "tabControl1Tab = 0;" in src
+    assert '(click)="button1Clicked.emit()"' in src and '(change)="checkBox1Toggled.emit($any($event.target).checked)"' in src
+    assert "@if (tabControl1Tab === 1) {" in src and "(click)=\"tabControl1Tab = 1; tabControl1TabChanged.emit(1)\"" in src
+    assert "&#123;x&#125;" in src and "&lt;b&gt;" in src                                       # { } und < > im Text maskiert (Control-Flow-Syntax!)
+    assert 'font-family:&quot;Segoe UI&quot;' in src and 'data-vds="button1"' in src
+
+
+def test_angular_names_and_file(tmp_path):
+    assert web.angular_names("Form1") == ("form1.component.ts", "Form1Component", "app-form1")
+    assert web.angular_names("MeineSeite")[0] == "meine-seite.component.ts" and web.angular_names("MeineSeite")[2] == "app-meine-seite"
+    m = sample("angular")
+    out = codegen.write_files(tmp_path / "MeineSeite.form.json", m)
+    assert out.name == "meine-seite.component.ts" and "class MeineSeiteComponent" in out.read_text() and targets.user_file(tmp_path / "MeineSeite.form.json", m) == out
+
+
+def test_angular_template_literal_is_safe_for_backticks_and_dollar_braces():
+    m = codegen.new_form("F", "angular")
+    m["controls"] = [ctl("Label", "label1", 5, 5, props={"text": "Preis `5` ${x} \\ @if"})]
+    src = web.angular_source(m, "FComponent", "app-f")
+    assert "\\`5\\`" in src and "$&#123;x&#125;" in src and "&#64;if" in src and "\\\\" in src      # Backticks maskiert, ${ im Text wird zu Entities (kein Template-Literal-Einschub)
+
+
+def test_tsc_accepts_angular_strings_are_valid_typescript(webtools):
+    """Die Angular-Komponente ist gültiges TypeScript (die Template-Prüfung übernimmt der echte Angular-Build in den Vorlagen)."""
+    f = webtools / "Ng.ts"
+    (webtools / "ngshim.d.ts").write_text("declare module '@angular/core' { export const Component: any; export class EventEmitter<T> { emit(v?: T): void } export const Output: any; }\n")
+    f.write_text(web.angular_source(every_control("angular"), "AllComponent", "app-all"))
+    r = subprocess.run([str(webtools / "node_modules/.bin/tsc"), "--noEmit", "--skipLibCheck", "--target", "es2020", "--lib", "es2020,dom", "--experimentalDecorators",
+                        "--strict", "--moduleResolution", "bundler", "--module", "esnext", "Ng.ts", "ngshim.d.ts"], cwd=webtools, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_web_form_picks_the_start_script_when_there_is_no_dev_script(qapp, pump, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from vds.app import MainWindow
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Discard))
+    log = tmp_path / "npm.log"
+    fake_npm(tmp_path / "bin", log)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:{os.environ['PATH']}")
+    proj = tmp_path / "ng"; (proj / "node_modules").mkdir(parents=True)
+    (proj / "package.json").write_text('{"scripts": {"start": "ng serve"}}')
+    codegen.write_files(proj / "Home.form.json", sample("angular"))
+    w = MainWindow(); w.show(); w.set_root(proj)
+    try:
+        w.docs.open(proj / "Home.form.json"); w.run("buildrun")
+        assert pump(lambda: (tmp_path / "npm.log.child").exists(), 20)
+        assert log.read_text().splitlines() == ["npm run start"]                  # node_modules vorhanden: kein install, Angular-Skript „start“
+        assert (proj / "home.component.ts").exists()
+        w.stop_any(); pump(lambda: not w.runner.busy, 20)
+    finally:
+        w.docs.close_all(); w.close()

@@ -18,7 +18,8 @@ from vds.project import ProjectSettings
 from vds.projects.templates import BY_ID, TEMPLATES, create_project
 from vds.ui import dialogs
 
-WEB = {"react-vite": ("src", "react", ".tsx"), "vue-vite": ("src", "vue", ".vue"), "next": ("components", "react", ".tsx"), "nuxt": ("components", "vue", ".vue")}
+WEB = {"react-vite": ("src", "react", "Form1.tsx"), "vue-vite": ("src", "vue", "Form1.vue"), "next": ("components", "react", "Form1.tsx"), "nuxt": ("components", "vue", "Form1.vue"),
+       "angular": ("src/app", "angular", "form1.component.ts")}
 
 
 def make(tid, tmp_path, name="Mein App", **opts):
@@ -27,15 +28,16 @@ def make(tid, tmp_path, name="Mein App", **opts):
 
 @pytest.mark.parametrize("tid", list(WEB))
 def test_web_templates_create_designer_form_run_command_and_valid_package_json(tid, tmp_path):
-    folder, target, ext = WEB[tid]
+    folder, target, user = WEB[tid]
     root, main, log = make(tid, tmp_path)
     pkg = json.loads((root / "package.json").read_text())
-    assert pkg["name"] == "mein-app" and "dev" in pkg["scripts"]                         # npm-tauglicher Name aus "Mein App"
+    assert pkg["name"] == "mein-app" and ("start" if tid == "angular" else "dev") in pkg["scripts"]                         # npm-tauglicher Name aus "Mein App"
     form = json.loads((root / folder / "Form1.form.json").read_text())
     assert form["target"] == target and form["title"] == "Mein App" and [c["type"] for c in form["controls"]] == ["Label", "Button"]
-    assert (root / folder / f"Form1{ext}").exists() and main == root / folder / "Form1.form.json"
-    assert ProjectSettings.load(root).run_cmd == "[ -d node_modules ] || npm install; npm run dev"
-    assert "Mein App" in (root / ("app.vue" if tid == "nuxt" else "app/page.tsx" if tid == "next" else f"src/App{ext}")).read_text()
+    assert (root / folder / user).exists() and main == root / folder / "Form1.form.json"
+    assert ProjectSettings.load(root).run_cmd.endswith("npm start" if tid == "angular" else "npm run dev")
+    entry = {"nuxt": "app.vue", "next": "app/page.tsx", "angular": "src/app/app.component.ts", "react-vite": "src/App.tsx", "vue-vite": "src/App.vue"}[tid]
+    assert "Mein App" in (root / entry).read_text()
 
 
 def test_java_swing_template_compiles_and_has_a_working_handler(tmp_path):
@@ -51,8 +53,8 @@ def test_java_swing_template_compiles_and_has_a_working_handler(tmp_path):
 def test_template_catalog_has_all_new_entries_and_unique_ids():
     ids = [t.id for t in TEMPLATES]
     assert len(ids) == len(set(ids))
-    assert {"react-vite", "vue-vite", "next", "nuxt", "java-swing", "php-console", "php-web"} <= set(ids)
-    assert all(BY_ID[i].form_target for i in ("react-vite", "vue-vite", "next", "nuxt", "java-swing"))
+    assert {"react-vite", "vue-vite", "next", "nuxt", "angular", "java-swing", "php-console", "php-web"} <= set(ids)
+    assert all(BY_ID[i].form_target for i in ("react-vite", "vue-vite", "next", "nuxt", "angular", "java-swing"))
 
 
 def test_gitignore_for_web_and_php(tmp_path):
@@ -67,7 +69,7 @@ def test_wizard_lists_and_filters_new_templates(qapp, tmp_path):
     from vds.projects.wizard import NewProjectDialog
     dlg = NewProjectDialog(None, tmp_path)
     ids = lambda: [dlg.list.item(i).data(Qt.UserRole).id for i in range(dlg.list.count())]
-    assert {"react-vite", "vue-vite", "next", "nuxt", "java-swing", "php-web", "php-console"} <= set(ids())
+    assert {"react-vite", "vue-vite", "next", "nuxt", "angular", "java-swing", "php-web", "php-console"} <= set(ids())
     dlg.f_lang.setCurrentText("PHP")
     assert set(ids()) == {"php-console", "php-web"}
     dlg.f_lang.setCurrentIndex(0); dlg.search.setText("nuxt")

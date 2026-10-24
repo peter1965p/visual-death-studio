@@ -11,8 +11,12 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 
 - **Formular-Designer** mit Toolbox (48 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste; Dialoge wie Datei öffnen/speichern, Ordner, Farbe, Schrift, Drucken, Druckvorschau, MessageBox als Komponentenleiste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
 - **Verschachtelung und Layouts** im Designer: Controls in GroupBox, Panel und TabWidget ziehen, Layouts (vertikal, horizontal, Raster) für Formular und Container
-- **Designer für mehrere Plattformen:** dasselbe Formular (Controls, Verschachtelung, Layouts) als **Python/Qt**, **Java Swing**, **React (TSX)** oder **Vue 3** ausgeben; Layouts werden zu Flex/Grid-CSS bzw. Swing-Layout-Managern, Ereignisse zu Props/Emits bzw. überschreibbaren Java-Methoden
-- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Next.js, Nuxt 3, Java Swing; dazu PHP (Skript und Webanwendung mit eingebautem Server)
+- **Designer für mehrere Plattformen:** dasselbe Formular (Controls, Verschachtelung, Layouts) als **Python/Qt**, **Java Swing**, **React (TSX)**, **Vue 3** oder **Angular** ausgeben; Layouts werden zu Flex/Grid-CSS bzw. Swing-Layout-Managern, Ereignisse zu Props/Emits bzw. überschreibbaren Java-Methoden
+- **Web-Vorschau für jedes Webprojekt** (Vite-Projekte mit React oder Vue, Angular, Next, Nuxt, PHP – alles, was einen Dev-Server mit Browser-Adresse hat): eingebetteter Browser, öffnet sich selbst, sobald ein Dev-Server seine Adresse meldet; Geräte-Größen, Zoom, Konsolenfehler in der Fehlerliste
+  - **Elemente anklicken** (⌖): Details, Eltern/Kind-Navigation, „Zum Code springen“ (id, Klassen, Text werden im Projekt gesucht; Elemente aus Designer-Seiten öffnen direkt das Formular)
+  - **Visuell bearbeiten** (✥): verschieben, Größe per Griff, Text per Doppelklick, Stile (Farbe, Schrift, Abstand, Rahmen …) live im Inspektor
+  - **In den Quellcode übernehmen** (Strg+Alt+S): die IDE zeigt die Möglichkeiten mit Unterschied (bestehende CSS-Regel, Tailwind-Klassen, Inline-Style, neue Regel) – erst nach deiner Bestätigung wird geschrieben, mit „Rückgängig“
+- **Projektvorlagen** mit Designer: React + TypeScript (Vite), Vue 3 (Vite), Angular, Next.js, Nuxt 3, Java Swing; dazu PHP (Skript und Webanwendung mit eingebautem Server)
 - **Start-Befehl** pro Projekt (z. B. `npm run dev`, `php -S …`): F5 startet den Dev-Server, Umschalt+F5 beendet ihn samt Kindprozessen
 - **Sprachabhängige Codeausschnitte** in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung

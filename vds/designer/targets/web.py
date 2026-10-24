@@ -2,6 +2,7 @@
 Layouts werden zu CSS (Flex/Grid), freie Positionierung zu position:absolute; Ereignisse sind Props (React) bzw. emits (Vue)."""
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -90,7 +91,7 @@ def ev(c: dict):
 def make_node(model: dict, c: dict, in_layout: bool, tabs: list) -> Node:
     t, p, name = c["type"], c["props"], c["name"]
     st = {**geometry(c, in_layout), **text_style(p)}
-    a: dict = {}
+    a: dict = {"data-vds": name}                         # Zuordnung für die Web-Vorschau: Klick im Browser wählt dieses Control im Designer
     if p.get("tooltip"):
         a["title"] = p["tooltip"]
     if p.get("enabled") is False:
@@ -270,6 +271,55 @@ def render_vue(n: Node, depth: int) -> str:
     return out + f"{pad}</{n.tag}>\n"
 
 
+NG_ARG = {"none": "", "value": "$any($event.target).value", "checked": "$any($event.target).checked", "index": "$any($event.target).selectedIndex",
+          "number": "+$any($event.target).value"}
+NG_TYPE = {"none": "void", "value": "string", "checked": "boolean", "index": "number", "number": "number"}
+
+
+def ng_text(t: str) -> str:
+    """Text im Angular-Template: HTML-Zeichen und die Steuerzeichen { } @ maskieren."""
+    return html.escape(t).replace("{", "&#123;").replace("}", "&#125;").replace("@", "&#64;")
+
+
+def render_ng(n: Node, depth: int) -> str:
+    pad = "  " * depth
+    attrs = []
+    for k, v in n.attrs.items():
+        attrs.append(k if v is True else f'{k}="{html.escape(str(v), quote=True)}"')
+    if n.style:
+        attrs.append('style="' + html.escape(";".join(f"{kebab(k)}:{css_value(k, v)}" for k, v in n.style.items()), quote=True) + '"')
+    for e in n.events:
+        if e["kind"] == "tab":
+            attrs.append(f'({e["dom"]})="{e["name"]} = {e["value"]}; {e["emit"]}.emit({e["value"]})"')
+        else:
+            arg = NG_ARG[e["arg"]]
+            attrs.append(f'({e["dom"]})="{e["name"]}.emit({arg})"')
+    head = f"{pad}<{n.tag}" + "".join(" " + a for a in attrs)
+    if n.tag in ("input", "img") and not n.children:
+        out = head + " />\n"
+    else:
+        out = head + ">\n"
+        for ch in n.children:
+            out += render_ng(ch, depth + 1) if isinstance(ch, Node) else f"{pad}  {ng_text(ch)}\n"
+        out += f"{pad}</{n.tag}>\n"
+    if n.cond:
+        name, i = n.cond.split(":")
+        out = f"{pad}@if ({name} === {i}) {{\n" + "".join("  " + line + "\n" for line in out.splitlines()) + f"{pad}}}\n"
+    return out
+
+
+def ts_template(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+
+
+def angular_source(model: dict, cls: str, selector: str) -> str:
+    root, tabs, events = build_form(model)
+    outs = "".join(f"  @Output() {n} = new EventEmitter<{NG_TYPE[a]}>();\n" for n, a in dict.fromkeys(events))
+    states = "".join(f"  {n} = {i};\n" for n, i in tabs)
+    return (f"// {base.HEADER_LINE}\nimport {{ Component, EventEmitter, Output }} from '@angular/core';\n\n@Component({{\n  selector: '{selector}',\n  standalone: true,\n"
+            f"  template: `\n" + ts_template(render_ng(root, 2)) + f"  `,\n}})\nexport class {cls} {{\n{outs}{states}}}\n" + component_functions(model, "ts"))
+
+
 def jsx_attr(k: str, v, tag: str) -> str:
     name = {"class": "className", "for": "htmlFor", "readonly": "readOnly"}.get(k, k)
     if k == "value" and tag in ("input", "textarea"):
@@ -369,9 +419,24 @@ def vue_source(model: dict, comp: str) -> str:
     return f"<!-- {base.HEADER_LINE} -->\n{script}{extra}\n<template>\n" + render_vue(root, 1) + "</template>\n"
 
 
+def kebab_name(stem: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", stem).lower()).strip("-") or "form"
+
+
+def angular_names(stem: str) -> tuple:
+    """(Dateiname, Klassenname, Selektor): Form1 -> form1.component.ts, Form1Component, app-form1"""
+    k = kebab_name(stem)
+    return f"{k}.component.ts", comp_name(stem) + "Component", f"app-{k}"
+
+
 def write(form_path: Path, model: dict, target: str) -> Path:
     stem = stem_of(form_path)
     comp = comp_name(stem)
+    if target == "angular":
+        fname, cls, sel = angular_names(stem)
+        out = form_path.parent / fname
+        out.write_text(angular_source(model, cls, sel), encoding="utf-8")
+        return out
     ext = ".tsx" if target == "react" else ".vue"
     out = form_path.parent / f"{stem}{ext}"
     out.write_text(react_source(model, comp) if target == "react" else vue_source(model, comp), encoding="utf-8")

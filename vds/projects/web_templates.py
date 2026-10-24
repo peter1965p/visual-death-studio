@@ -76,3 +76,37 @@ PHP_WEB = {
                         '    <button>Begrüßen</button>\n  </form>\n  <?php if ($name !== \'\'): ?>\n    <p><?= htmlspecialchars($greeter->greet($name)) ?></p>\n  <?php endif; ?>\n</body>\n</html>\n',
     "src/Greeter.php": '<?php\n\ndeclare(strict_types=1);\n\nclass Greeter\n{\n    public function greet(string $name): string\n    {\n        return "Hallo, {$name}!";\n    }\n}\n',
 }
+
+ANGULAR_FILES = {
+    "package.json": '{\n  "name": "__IDLOWER__",\n  "version": "0.0.0",\n  "scripts": {\n    "ng": "ng",\n    "start": "ng serve",\n    "build": "ng build"\n  },\n  "private": true,\n'
+                    '  "dependencies": {\n    "@angular/common": "^19.0.0",\n    "@angular/compiler": "^19.0.0",\n    "@angular/core": "^19.0.0",\n'
+                    '    "@angular/platform-browser": "^19.0.0",\n    "rxjs": "~7.8.0",\n    "tslib": "^2.6.0",\n    "zone.js": "~0.15.0"\n  },\n'
+                    '  "devDependencies": {\n    "@angular-devkit/build-angular": "^19.0.0",\n    "@angular/cli": "^19.0.0",\n    "@angular/compiler-cli": "^19.0.0",\n'
+                    '    "typescript": "~5.6.0"\n  }\n}\n',
+    "angular.json": '{\n  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",\n  "version": 1,\n  "newProjectRoot": "projects",\n  "projects": {\n    "app": {\n'
+                    '      "projectType": "application",\n      "root": "",\n      "sourceRoot": "src",\n      "prefix": "app",\n      "architect": {\n        "build": {\n'
+                    '          "builder": "@angular-devkit/build-angular:application",\n          "options": {\n            "outputPath": "dist/app",\n'
+                    '            "index": "src/index.html",\n            "browser": "src/main.ts",\n            "polyfills": ["zone.js"],\n'
+                    '            "tsConfig": "tsconfig.app.json",\n            "assets": [],\n            "styles": ["src/styles.css"],\n            "scripts": []\n          },\n'
+                    '          "configurations": {\n            "production": { "outputHashing": "all" },\n'
+                    '            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }\n          },\n'
+                    '          "defaultConfiguration": "production"\n        },\n        "serve": {\n          "builder": "@angular-devkit/build-angular:dev-server",\n'
+                    '          "configurations": {\n            "production": { "buildTarget": "app:build:production" },\n'
+                    '            "development": { "buildTarget": "app:build:development" }\n          },\n          "defaultConfiguration": "development"\n        }\n      }\n    }\n  }\n}\n',
+    "tsconfig.json": '{\n  "compileOnSave": false,\n  "compilerOptions": {\n    "outDir": "./dist/out-tsc",\n    "strict": true,\n    "noImplicitOverride": true,\n'
+                     '    "noImplicitReturns": true,\n    "noFallthroughCasesInSwitch": true,\n    "skipLibCheck": true,\n    "isolatedModules": true,\n'
+                     '    "esModuleInterop": true,\n    "experimentalDecorators": true,\n    "moduleResolution": "bundler",\n    "importHelpers": true,\n'
+                     '    "target": "ES2022",\n    "module": "ES2022"\n  },\n  "angularCompilerOptions": {\n    "enableI18nLegacyMessageIdFormat": false,\n'
+                     '    "strictInjectionParameters": true,\n    "strictInputAccessModifiers": true,\n    "strictTemplates": true\n  }\n}\n',
+    "tsconfig.app.json": '{\n  "extends": "./tsconfig.json",\n  "compilerOptions": {\n    "outDir": "./out-tsc/app",\n    "types": []\n  },\n  "files": ["src/main.ts"],\n'
+                         '  "include": ["src/**/*.d.ts"]\n}\n',
+    "src/index.html": '<!doctype html>\n<html lang="de">\n<head>\n  <meta charset="utf-8">\n  <title>__NAME__</title>\n  <base href="/">\n'
+                      '  <meta name="viewport" content="width=device-width, initial-scale=1">\n</head>\n<body>\n  <app-root></app-root>\n</body>\n</html>\n',
+    "src/main.ts": "import { bootstrapApplication } from '@angular/platform-browser';\nimport { AppComponent } from './app/app.component';\n\n"
+                   "bootstrapApplication(AppComponent).catch((err) => console.error(err));\n",
+    "src/styles.css": "body { font-family: system-ui, sans-serif; margin: 0; }\n",
+    "src/app/app.component.ts": "import { Component } from '@angular/core';\nimport { Form1Component } from './form1.component';\n\n@Component({\n  selector: 'app-root',\n"
+                                "  standalone: true,\n  imports: [Form1Component],\n  template: `\n    <div style=\"padding: 24px\">\n      <h1>__NAME__</h1>\n"
+                                "      <app-form1 (button1Clicked)=\"msg = 'Button geklickt!'\" />\n      <p>{{ msg }}</p>\n    </div>\n  `,\n})\n"
+                                "export class AppComponent {\n  msg = '';\n}\n",
+}

@@ -1,10 +1,14 @@
 """Hauptfenster: Menüleiste, Toolbar, Docks und Statusleiste im Stil von Visual Studio 2022."""
+import json
 import re
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
-from PySide6.QtCore import QSettings, QTimer, QUrl, Qt
+import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication importiert werden
+
+from PySide6.QtCore import QCoreApplication, QSettings, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
                                QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
@@ -14,6 +18,9 @@ from .build.languages import LANGS, lang_for, parse_problems
 from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
+from .web import devserver
+from .web.inspector import WebInspector
+from .web.panel import PreviewPanel
 from .designer import codegen
 from .designer import targets as designer_targets
 from .diff import changes as gitc
@@ -47,7 +54,7 @@ PIP_NAMES = {"cv2": "opencv-python", "PIL": "pillow", "yaml": "pyyaml", "sklearn
              "dateutil": "python-dateutil", "serial": "pyserial", "Crypto": "pycryptodome", "dotenv": "python-dotenv",
              "skimage": "scikit-image", "attr": "attrs", "OpenSSL": "pyopenssl", "jwt": "pyjwt", "git": "gitpython", "usb": "pyusb"}
 
-LAYOUT_VERSION = 5   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
+LAYOUT_VERSION = 6   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
 ROOT = Path(__file__).resolve().parent.parent
 REPO_URL = "https://github.com/peter1965p/visual-death-studio"
 SAMPLES = {
@@ -121,6 +128,8 @@ class MainWindow(QMainWindow):
     def _build_docks(self):
         self.explorer, self.props, self.toolbox = Explorer(), PropertiesDock(), Toolbox()
         self.chat = ChatPanel()
+        self.preview = PreviewPanel()
+        self.inspector = WebInspector(self.preview)
         self.changes = ChangesPanel()
         self.packages = PackagePanel()
         self.output, self.errors, self.bps = OutputPane(), ErrorList(), Breakpoints()
@@ -136,6 +145,11 @@ class MainWindow(QMainWindow):
         self.d_chat = self._dock("Claude", self.chat, R, "chat")
         self.d_props = self._dock("Eigenschaften", self.props, R, "props")
         self.splitDockWidget(self.d_chat, self.d_props, Qt.Vertical)
+        self.d_preview = self._dock("Web-Vorschau", self.preview, R, "webpreview")
+        self.d_inspector = self._dock("Web-Element", self.inspector, R, "webinspector")
+        self.tabifyDockWidget(self.d_chat, self.d_preview)
+        self.tabifyDockWidget(self.d_props, self.d_inspector)
+        self.d_chat.raise_(); self.d_props.raise_()
         self.tabifyDockWidget(self.d_explorer, self.d_toolbox)
         self.tabifyDockWidget(self.d_explorer, self.d_changes)
         self.d_explorer.raise_()
@@ -160,7 +174,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.d_chat], [360], Qt.Horizontal)
         self.resizeDocks([self.d_chat, self.d_props], [520, 260], Qt.Vertical)
         self.resizeDocks([self.d_output], [230], Qt.Vertical)
-        self.all_docks = [self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
+        self.all_docks = [self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
         QApplication.instance().focusChanged.connect(self._focus_changed)
 
     def _focus_changed(self, _old, new):
@@ -244,6 +258,11 @@ class MainWindow(QMainWindow):
             testcancel=A("Testlauf abbrechen", self.tests.cancel),
             pkgs=A("Paket-Manager", self.open_packages, "Ctrl+Alt+P"),
             options=A("Optionen…", self.show_options, "Ctrl+,"),
+            webopen=A("Web-Vorschau öffnen", self.open_preview, "Ctrl+Alt+W"),
+            webreload=A("Web-Vorschau neu laden", lambda: self.preview.reload(), "Ctrl+Alt+R"),
+            webpick=A("Web-Element auswählen", lambda: (self.open_preview(), self.preview.set_mode("pick")), "Ctrl+Alt+E"),
+            webedit=A("Web-Seite visuell bearbeiten", lambda: (self.open_preview(), self.preview.set_mode("edit")), "Ctrl+Alt+B"),
+            webwrite=A("Web-Änderungen in den Quellcode übernehmen…", lambda: self.inspector.write_back(), "Ctrl+Alt+S"),
             editorfont=A("Editor-Schrift…", self.pick_editor_font),
             cmpfiles=A("Dateien vergleichen…", self.compare_files),
             cmpsaved=A("Mit gespeicherter Version vergleichen", self.compare_saved),
@@ -286,6 +305,9 @@ class MainWindow(QMainWindow):
             v.addAction(d.toggleViewAction())
         v.addSeparator()
         v.addAction(a["viewcode"]); v.addAction(a["viewdesigner"])
+        v.addSeparator()
+        for k in ("webopen", "webreload", "webpick", "webedit", "webwrite"):
+            v.addAction(a[k])
         v.addSeparator()
         v.addAction(a["reset"])
         menu("&Projekt", [a["newproject"], a["newitem"], a["newform"], a["newfolder"], a["additem"], None, a["setstartup"], a["pkgs"], a["analyze"], None,
@@ -370,6 +392,15 @@ class MainWindow(QMainWindow):
         self.docs.docClosed.connect(lambda d: d.kind == "code" and self.lsp.detach(d.path))
         self.docs.saved.connect(lambda d: d.kind == "code" and self.lsp.did_save(d.path))
         self.docs.saved.connect(self._form_saved)
+        self.docs.saved.connect(self._web_saved)
+        self._dev_buf, self._dev_url_done = "", False
+        self.runner.output.connect(self._scan_dev_url)
+        self.runner.busyChanged.connect(lambda busy: busy and (setattr(self, "_dev_buf", ""), setattr(self, "_dev_url_done", False)))
+        self.preview.consoleMessage.connect(self._web_console)
+        self.preview.view.loadStarted.connect(lambda: self.errors.set_source("web", []))
+        self.preview.pageLoaded.connect(lambda ok, url: ok and self.settings.setValue(f"web/url/{self.root}", url))
+        self.inspector.openFile.connect(lambda f, line: self.goto(f, line, 1))
+        self.inspector.designerControl.connect(self._select_designer_control)
         self.lsp.diagnostics.connect(self._lsp_diagnostics)
         self.lsp.editRequested.connect(lambda edits, label: self._apply_refactor(edits, label, preview=len(edits) > 1))
         self.p_refs.activated.connect(lambda path, line, col: self.goto(path, line, col))
@@ -478,6 +509,56 @@ class MainWindow(QMainWindow):
         from .ui.options_dialog import OptionsDialog
         OptionsDialog(self).exec()
 
+    # --- Web-Vorschau -----------------------------------------------------------------------------------
+    def open_preview(self):
+        self.d_preview.show(); self.d_preview.raise_()
+        self.d_inspector.show(); self.d_inspector.raise_()
+
+    def _scan_dev_url(self, text: str, _kind: str):
+        """Dev-Server-Adresse in der Programmausgabe erkennen und die Vorschau darauf öffnen."""
+        if self._dev_url_done or not options.get("web/auto_open"):
+            return
+        self._dev_buf = (self._dev_buf + text)[-4000:]
+        url = devserver.find_url(self._dev_buf)
+        if url:
+            self._dev_url_done = True
+            self.open_preview()
+            self.preview.set_url(url)
+            self.statusBar().showMessage(f"Web-Vorschau: {url}", 6000)
+
+    def _web_console(self, level: str, msg: str, line: int, src: str):
+        if level == "info":
+            return
+        path = unquote(urlparse(src).path).lstrip("/")
+        f = self.root / path if path and (self.root / path).is_file() else None
+        rows = list(self.errors.sources.get("web", []))[-49:]
+        rows.append(("error" if level == "error" else "warning", msg.splitlines()[0][:300], str(f or src), max(1, line), 1))
+        self.errors.set_source("web", rows)
+        if level == "error":
+            self.output.append(f"[Browser] {msg}\n", "stderr")
+
+    def _web_saved(self, d):
+        mode = options.get("web/auto_reload")
+        if self.d_preview.isVisible() and not self.inspector.pending and not self.inspector.text_pending:
+            self.preview.schedule_reload(mode=mode)
+
+    def _select_designer_control(self, name: str):
+        """Element aus einer vom Designer erzeugten Seite (data-vds): das passende Formular öffnen und das Control auswählen."""
+        import json as _json
+        for f in sorted(self.root.rglob("*.form.json")):
+            if "node_modules" in f.parts:
+                continue
+            try:
+                m = _json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if any(c.get("name") == name for c in m.get("controls", []) + m.get("components", [])):
+                doc = self.docs.open(f)
+                if doc and doc.kind == "form":
+                    doc.view.canvas.set_sel([name])
+                return
+        self.statusBar().showMessage(f"Kein Formular mit dem Control „{name}“ gefunden.", 5000)
+
     def _form_saved(self, d):
         if d.kind == "form" and d.warnings:
             self.statusBar().showMessage(f"Hinweis: Für {designer_targets.LABELS[d.target]} werden nicht erzeugt: " + ", ".join(d.warnings[:6])
@@ -502,6 +583,10 @@ class MainWindow(QMainWindow):
             for d in self.docs.docs.values():
                 if d.kind == "form":
                     d.view.canvas.update(); d.view.canvas.surface.update()
+        if not key or key == "web/device":
+            dev = options.get("web/device")
+            if dev in [self.preview.device.itemText(i) for i in range(self.preview.device.count())]:
+                self.preview.device.setCurrentText(dev)
         if not key or key.startswith("claude/") or key == "ai/completion_model":
             self.chat.refresh_backend()
 
@@ -551,6 +636,10 @@ class MainWindow(QMainWindow):
         self.d_explorer.setWindowTitle(f"Projektmappen-Explorer – {path.name}")
         self.runner.build_dir = path / ".vds" / "bin"
         self.chat.set_root(path)
+        self.inspector.set_root(path)
+        last = self.settings.value(f"web/url/{path}")
+        if last and not self.preview.current_url():
+            self.preview.url.setText(str(last))
         self.lsp.set_root(path)
         self.ai.root = path
         self.changes.set_root(path)
@@ -644,7 +733,12 @@ class MainWindow(QMainWindow):
             self.output.append("Zum Starten braucht das Projekt eine package.json (z. B. React/Vue-Vorlage aus dem Projekt-Assistenten) und npm.\n"
                                + ("" if shutil.which("npm") else dbg_tools.missing_message("npm", "Web-Projekte") + "\n"), "stderr")
             return True
-        steps = ([(["npm", "install"], folder)] if not (folder / "node_modules").exists() else []) + [(["npm", "run", "dev"], folder)]
+        try:
+            scripts = json.loads((folder / "package.json").read_text(encoding="utf-8")).get("scripts", {})
+        except (OSError, ValueError):
+            scripts = {}
+        script = "dev" if "dev" in scripts or "start" not in scripts else "start"          # Vite/Next/Nuxt: dev, Angular: start
+        steps = ([(["npm", "install"], folder)] if not (folder / "node_modules").exists() else []) + [(["npm", "run", script], folder)]
         self.output.append(f"Dev-Server: {' && '.join(' '.join(c) for c, _ in steps)}  (Stopp: Umschalt+F5)\n", "info")
         self._build_base = folder
         self.runner.start_steps(steps, group=True)
@@ -1006,7 +1100,7 @@ class MainWindow(QMainWindow):
             user = designer_targets.user_file(doc.path, model)
             if designer_targets.target_of(model) in designer_targets.WEB:
                 self.docs.open(user)
-                return self.statusBar().showMessage(f"Ereignis '{h[0]}': in der Komponente als Prop (React: on{h[0][:1].upper() + h[0][1:]}) bzw. Emit (Vue: @{h[0]}) verbinden.", 8000)
+                return self.statusBar().showMessage(f"Ereignis '{h[0]}': beim Einbinden verbinden – React: on{h[0][:1].upper() + h[0][1:]}, Vue: @{h[0]}, Angular: ({h[0]}).", 8000)
             line = designer_targets.add_handler(user, model, *h)
         d = self.docs.open(user)
         if d:
@@ -1222,6 +1316,7 @@ class MainWindow(QMainWindow):
             return e.ignore()
         self.settings.setValue("root", str(self.root))
         self.runner.stop()
+        self.preview.shutdown()
         self.terminal.shutdown()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("state", self.saveState())
@@ -1243,6 +1338,7 @@ def main():
     if "--install-desktop" in sys.argv:
         print("Starter angelegt:", install_desktop_entry())
         return
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)     # nötig für QtWebEngine
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     if desktop_entry_exists():          # sonst meldet das Desktop-Portal „App info not found“
@@ -1255,4 +1351,7 @@ def main():
     w = MainWindow()
     w._default_state = w.saveState()
     w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    from .web.panel import dispose_profiles
+    dispose_profiles()
+    sys.exit(code)
