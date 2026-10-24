@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QColorDialog, QComboBox, QHBox
 
 from ..ui.font_dialog import FontDialog, describe, dict_to_font, font_to_dict
 from ..designer.controls import BY_TYPE, CHOICES, KIND_DEFAULT, PROP_INFO, prop_keys
+from ..designer.layouts import LAYOUT_DEFAULTS, LAYOUT_KEYS
 from .tools import Properties
 
 
@@ -131,8 +132,12 @@ class PropertiesDock(QWidget):
         self.combo.blockSignals(True)
         self.combo.clear()
         self.combo.addItem(f"{m['name']}  (Form)")
+        names = {c["name"]: c for c in m["controls"]}
         for c in m["controls"]:
-            self.combo.addItem(f"{c['name']}  ({c['type']})")
+            depth, p = 0, c.get("parent")
+            while p in names:
+                depth += 1; p = names[p].get("parent")
+            self.combo.addItem(f"{'    ' * depth}{c['name']}  ({c['type']})")
         self.combo.setCurrentIndex(0 if cur is None else 1 + [c["name"] for c in m["controls"]].index(cur))
         self.combo.blockSignals(False)
         if source != "grid":
@@ -186,6 +191,9 @@ class PropertiesDock(QWidget):
             self._section("Layout")
             self._row("Width", self._edit("int", m["width"], lambda v: cv.set_prop(None, "width", v)))
             self._row("Height", self._edit("int", m["height"], lambda v: cv.set_prop(None, "height", v)))
+            for k in LAYOUT_KEYS:
+                label, kind, _ = PROP_INFO[k]
+                self._row(label, self._edit(kind, m.get(k, LAYOUT_DEFAULTS[k]), lambda v, k=k: cv.set_prop(None, k, v), CHOICES.get(k)))
             return
         c = cv.control(cid)
         self._section("Design")
@@ -197,6 +205,8 @@ class PropertiesDock(QWidget):
         for k in prop_keys(BY_TYPE[c["type"]]):
             label, kind, cat = PROP_INFO[k]
             cats.setdefault(cat, []).append((k, label, kind))
+        for k, label, kind in cats.pop("Layout", []):                      # Layout-Eigenschaften von Containern
+            self._row(label, self._edit(kind, c["props"].get(k, LAYOUT_DEFAULTS[k]), lambda v, k=k: cv.set_prop(cid, k, v), CHOICES.get(k)))
         for cat in ("Darstellung", "Verhalten", "Daten"):
             if cat in cats:
                 self._section(cat)

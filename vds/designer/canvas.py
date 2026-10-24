@@ -4,9 +4,12 @@ import json
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QScrollArea, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
+from shiboken6 import delete as delete_qobject
 
-from .controls import BY_TYPE, apply_prop, font_decls, font_for, make_widget, new_props
+from . import layouts
+from .controls import BY_TYPE, apply_prop, font_decls, make_widget, new_props
+from .layouts import CONTAINERS, LAYOUT_KEYS
 
 M, TB, GRID, SNAP, HS = 24, 30, 8, 5, 7        # Rand, Titelleiste, Raster, Snap-Distanz, Handle-Größe
 HANDLES = [(0, 0), (.5, 0), (1, 0), (1, .5), (1, 1), (.5, 1), (0, 1), (0, .5)]
@@ -21,9 +24,11 @@ LIGHT = """
   { background:#fff; color:#000; border:1px solid #7a7a7a; selection-background-color:#3399ff; }
 #formsurface QComboBox QAbstractItemView { background:#fff; color:#000; }
 #formsurface QLabel, #formsurface QCheckBox, #formsurface QRadioButton, #formsurface QGroupBox { color:#000; background:transparent; }
-#formsurface QGroupBox { border:1px solid #dcdcdc; margin-top:8px; } #formsurface QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 3px; }
+#formsurface QGroupBox { border:1px solid #a0a0a0; margin-top:8px; } #formsurface QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 3px; }
 #formsurface QFrame[vdsPanel="true"] { border:1px solid #a0a0a0; background:transparent; } #formsurface QProgressBar { border:1px solid #bcbcbc; background:#e6e6e6; color:#000; text-align:center; }
 #formsurface QProgressBar::chunk { background:#06b025; }
+#formsurface QTabWidget::pane { border:1px solid #a0a0a0; background:transparent; } #formsurface QTabBar::tab { background:#e1e1e1; color:#000; padding:4px 10px; border:1px solid #adadad; }
+#formsurface QTabBar::tab:selected { background:#fff; }
 """
 
 
@@ -48,6 +53,8 @@ class Overlay(QWidget):
     def paintEvent(self, e):
         c, p = self.c, QPainter(self)
         for cid in c.sel:
+            if not c._visible(cid):
+                continue
             p.setPen(QPen(QColor("#00b8d9"), 1, Qt.DotLine)); p.setBrush(Qt.NoBrush)
             p.drawRect(c.canvas_rect(cid).adjusted(0, 0, -1, -1))
         for r in c.handle_rects().values():
@@ -55,7 +62,7 @@ class Overlay(QWidget):
         p.setPen(QPen(GUIDE, 1))
         for kind, v in c.guides:
             if kind == "v":
-                p.drawLine(v + M, M + TB, v + M, M + TB + c.model["height"])
+                p.drawLine(v + M, M + TB, v + M, M + TB + c.model["height"])     # v/h: Position in Formularkoordinaten
             else:
                 p.drawLine(M, v + M + TB, M + c.model["width"], v + M + TB)
         if c.band:
@@ -69,6 +76,7 @@ class Canvas(QWidget):
         self.owner = owner
         self.model = None
         self.items: dict[str, QWidget] = {}
+        self.pages: dict[str, list] = {}              # TabWidget -> Seiten-Widgets
         self.sel: list[str] = []
         self.guides, self.band, self.drag = [], None, None
         self.undo_stack, self.redo_stack, self._last_prop = [], [], None
@@ -85,25 +93,98 @@ class Canvas(QWidget):
     # --- Modell -----------------------------------------------------------------
     def load(self, model):
         self.model = model
+        layouts.normalize(model)
         self.undo_stack.clear(); self.redo_stack.clear()
         self.rebuild()
 
     def rebuild(self):
         for w in self.items.values():
-            w.deleteLater()
-        self.items = {}
-        for c in self.model["controls"]:
-            self._create_widget(c)
+            w.hide(); w.setParent(None); w.deleteLater()
+        self.items, self.pages = {}, {}
+        old = self.surface.layout()
+        if old is not None:
+            delete_qobject(old)
+        self._build(None)
         self.sel = [s for s in self.sel if s in self.items]
         self.relayout()
+        self._apply_layouts()
+
+    def _build(self, parent):
+        for c in self.model["controls"]:
+            if c.get("parent") == parent:
+                self._create_widget(c)
+                if c["type"] in CONTAINERS:
+                    self._build(c["name"])
+
+    def _holder(self, parent, tab=0):
+        """Das Widget, in das Kinder von `parent` (Tab `tab`) gehören."""
+        if parent is None:
+            return self.surface
+        pages = self.pages.get(parent)
+        return pages[min(max(tab, 0), len(pages) - 1)] if pages else self.items[parent]
+
+    def _holders(self, key):
+        """[(Tab, Widget)] der Layout-Flächen eines Containers (None = Formular)."""
+        if key is None:
+            return [(0, self.surface)]
+        if key in self.pages:
+            return list(enumerate(self.pages[key]))
+        return [(0, self.items[key])]
 
     def _create_widget(self, c):
-        w = make_widget(c["type"], c["props"], self.surface)
+        parent = self.control(c["parent"]) if c.get("parent") else None
+        w = make_widget(c["type"], c["props"], self._holder(c.get("parent"), layouts.tab_of(c, parent)))
         w.setAttribute(Qt.WA_TransparentForMouseEvents)
         w.setFocusPolicy(Qt.NoFocus)
+        if c["type"] == "TabWidget":
+            pages = []
+            for t in layouts.tab_titles(c["props"]):
+                page = QWidget(w); w.addTab(page, t); pages.append(page)
+            self.pages[c["name"]] = pages
+            w.setCurrentIndex(min(max(int(c["props"].get("current", 0)), 0), len(pages) - 1))
         w.setGeometry(c["x"], c["y"], c["w"], c["h"])
         w.show()
         self.items[c["name"]] = w
+
+    def _layout_mode(self, parent):
+        return layouts.cfg(self.model if parent is None else self.control(parent)["props"])[0]
+
+    def _apply_layouts(self, only="*"):
+        """Legt Qt-Layouts über Formular und Container (only: nur dieser Container, None = Formular)."""
+        keys = [None] + [c["name"] for c in self.model["controls"] if c["type"] in CONTAINERS] if only == "*" else [only]
+        for key in keys:
+            mode, spacing, margin, cols = layouts.cfg(self.model if key is None else self.control(key)["props"])
+            for tab, holder in self._holders(key):
+                if holder.layout() is not None:
+                    delete_qobject(holder.layout())
+                kids = layouts.children(self.model, key, tab)
+                for c in kids:
+                    w = self.items[c["name"]]
+                    if mode == "Keine":
+                        w.setMinimumSize(0, 0); w.setGeometry(c["x"], c["y"], c["w"], c["h"])
+                    else:
+                        w.setMinimumSize(c["w"], c["h"])
+                if mode == "Keine":
+                    continue
+                lay = {"Vertikal": QVBoxLayout, "Horizontal": QHBoxLayout, "Raster": QGridLayout}[mode](holder)
+                lay.setSpacing(spacing); lay.setContentsMargins(margin, margin, margin, margin)
+                for n, c in enumerate(layouts.ordered(kids, mode)):
+                    if mode == "Raster":
+                        lay.addWidget(self.items[c["name"]], n // cols, n % cols)
+                    else:
+                        lay.addWidget(self.items[c["name"]])
+                lay.activate()
+
+    def _place(self, c):
+        """Bringt das Widget auf die Modellgeometrie – oder lässt das Layout des Containers neu anordnen."""
+        if self._layout_mode(c.get("parent")) == "Keine":
+            self.items[c["name"]].setGeometry(c["x"], c["y"], c["w"], c["h"])
+        else:
+            self._apply_layouts(c.get("parent"))
+
+    def origin(self, parent, tab=0) -> QPoint:
+        """Ursprung der Kinderfläche in Formularkoordinaten."""
+        return self._holder(parent, tab).mapTo(self.surface, QPoint(0, 0))
 
     def relayout(self):
         m = self.model
@@ -120,8 +201,25 @@ class Canvas(QWidget):
         return next((c for c in self.model["controls"] if c["name"] == cid), None)
 
     def canvas_rect(self, cid) -> QRect:
-        c = self.control(cid)
-        return QRect(c["x"] + M, c["y"] + M + TB, c["w"], c["h"])
+        w = self.items[cid]
+        p = w.mapTo(self.surface, QPoint(0, 0))
+        return QRect(p.x() + M, p.y() + M + TB, w.width(), w.height())
+
+    def _visible(self, cid) -> bool:
+        return cid in self.items and self.items[cid].isVisibleTo(self.surface)
+
+    def container_at(self, p, exclude=()):
+        """Innerster Container unter dem Punkt (Canvaskoordinaten): (Name | None = Formular, Tab)."""
+        sp = QPoint(p.x() - M, p.y() - M - TB)
+        for c in reversed(self.model["controls"]):
+            if c["type"] not in CONTAINERS or c["name"] in exclude or not self._visible(c["name"]):
+                continue
+            w, tab = self.items[c["name"]], 0
+            if c["type"] == "TabWidget":
+                w, tab = w.currentWidget(), w.currentIndex()
+            if QRect(w.mapTo(self.surface, QPoint(0, 0)), w.size()).contains(sp):
+                return c["name"], tab
+        return None, 0
 
     def _snapshot(self):
         return json.dumps(self.model)
@@ -150,32 +248,59 @@ class Canvas(QWidget):
         return f"{base}{n}"
 
     # --- Operationen -------------------------------------------------------------------
-    def add_control(self, ctype, pos=None):
+    def add_control(self, ctype, pos=None, parent=None, tab=0):
+        """pos: Position relativ zum Container `parent` (None = Formular)."""
         spec = BY_TYPE[ctype]
+        if pos is None:
+            sel = self.control(self.sel[0]) if len(self.sel) == 1 else None
+            if sel and sel["type"] in CONTAINERS:                           # Doppelklick in der Toolbox: in den gewählten Container
+                parent, tab = sel["name"], (self.items[sel["name"]].currentIndex() if sel["type"] == "TabWidget" else 0)
+                pos = (16, 24)
+            else:
+                k = len(self.model["controls"]) % 10
+                pos = (24 + 16 * k, 24 + 16 * k)
         self.push_undo()
         name = self.unique_name(spec.base)
-        if pos is None:
-            k = len(self.model["controls"]) % 10
-            pos = (24 + 16 * k, 24 + 16 * k)
         c = {"type": ctype, "name": name, "x": self._grid(pos[0]), "y": self._grid(pos[1]),
              "w": spec.size[0], "h": spec.size[1], "props": new_props(spec, name)}
+        if parent:
+            c["parent"] = parent
+            if self.control(parent)["type"] == "TabWidget":
+                c["tab"] = tab
         self.model["controls"].append(c)
         self._create_widget(c)
+        self._place(c)
         self.set_sel([name]); self.owner.changed("add")
 
     def set_sel(self, ids):
         self.sel = list(ids)
         self.overlay.update(); self.owner.selection_changed()
 
+    def _top_level(self, names):
+        """Aus der Auswahl nur Controls, deren Container nicht ebenfalls gewählt ist."""
+        sel = set(names)
+        out = []
+        for n in names:
+            p, up = self.control(n).get("parent"), False
+            while p:
+                if p in sel:
+                    up = True; break
+                p = self.control(p).get("parent")
+            if not up:
+                out.append(n)
+        return out
+
     def delete_selected(self):
         if not self.sel:
             return
         self.push_undo()
-        self.model["controls"] = [c for c in self.model["controls"] if c["name"] not in self.sel]
+        gone = set(layouts.with_descendants(self.model, self.sel))
+        self.model["controls"] = [c for c in self.model["controls"] if c["name"] not in gone]
         self.set_sel([]); self.rebuild(); self.owner.changed("delete")
 
     def copy(self):
-        self.clipboard = [copy.deepcopy(self.control(s)) for s in self.sel]
+        names = layouts.with_descendants(self.model, self._top_level(self.sel))
+        self.clipboard = [copy.deepcopy(self.control(n)) for n in names]
 
     def cut(self):
         self.copy(); self.delete_selected()
@@ -184,16 +309,23 @@ class Canvas(QWidget):
         if not self.clipboard:
             return
         self.push_undo()
-        new = []
+        mapping, new = {}, []
         for src in self.clipboard:
             c = copy.deepcopy(src)
             c["name"] = self.unique_name(BY_TYPE[c["type"]].base)
-            c["x"] += 16; c["y"] += 16
+            mapping[src["name"]] = c["name"]
+            if src.get("parent") in mapping:                                 # Kinder bleiben im kopierten Container
+                c["parent"] = mapping[src["parent"]]
+            else:
+                if src.get("parent") and not self.control(src["parent"]):
+                    c.pop("parent", None); c.pop("tab", None)
+                c["x"] += 16; c["y"] += 16
+                new.append(c["name"])
             for k in ("text", "title"):
                 if c["props"].get(k) == src["name"]:
                     c["props"][k] = c["name"]
-            self.model["controls"].append(c); self._create_widget(c); new.append(c["name"])
-        self.set_sel(new); self.owner.changed("paste")
+            self.model["controls"].append(c)
+        self.set_sel(new); self.rebuild(); self.owner.changed("paste")
 
     def select_all(self):
         self.set_sel([c["name"] for c in self.model["controls"]])
@@ -201,7 +333,7 @@ class Canvas(QWidget):
     def set_prop(self, cid, key, value, source="grid"):
         """cid None = Formular. Rückgabe: True, wenn übernommen."""
         if cid is None:
-            if key in ("title", "back_color", "font"):
+            if key in ("title", "back_color", "font") or key in LAYOUT_KEYS:
                 pass
             elif key not in ("width", "height"):
                 return False
@@ -211,23 +343,33 @@ class Canvas(QWidget):
                 self.push_undo(); self._last_prop = (None, key)
             self.model[key] = value
             self.relayout()
+            if key in LAYOUT_KEYS:
+                self._apply_layouts(None)
         else:
             c = self.control(cid)
             if key == "name":
                 if not str(value).isidentifier() or any(x["name"] == value for x in self.model["controls"] if x is not c):
                     return False
                 self.push_undo(); c["name"] = value; self.items[value] = self.items.pop(cid)
+                if cid in self.pages:
+                    self.pages[value] = self.pages.pop(cid)
+                for x in self.model["controls"]:
+                    if x.get("parent") == cid:
+                        x["parent"] = value
                 self.sel = [value if s == cid else s for s in self.sel]
             elif key in ("x", "y", "w", "h"):
                 if self._last_prop != (cid, key):
                     self.push_undo(); self._last_prop = (cid, key)
                 c[key] = max(8, value) if key in ("w", "h") else value
-                self.items[cid].setGeometry(c["x"], c["y"], c["w"], c["h"])
+                self._place(c)
             else:
                 if self._last_prop != (cid, key):
                     self.push_undo(); self._last_prop = (cid, key)
                 c["props"][key] = value
-                apply_prop(self.items[cid], c["type"], key, value, c["props"])
+                if key in LAYOUT_KEYS or key in ("tabs", "current"):         # strukturelle Eigenschaften: Fläche neu aufbauen
+                    self.rebuild()
+                else:
+                    apply_prop(self.items[cid], c["type"], key, value, c["props"])
         self.overlay.update()
         self.owner.changed(source)
         return True
@@ -239,6 +381,8 @@ class Canvas(QWidget):
 
     def handle_rects(self) -> dict:
         if len(self.sel) == 1:
+            if self._layout_mode(self.control(self.sel[0]).get("parent")) != "Keine" or not self._visible(self.sel[0]):
+                return {}                                                    # Größe bestimmt das Layout
             r = self.canvas_rect(self.sel[0]); idx = range(8)
         elif not self.sel and self.model:
             r = QRect(M, M + TB, self.model["width"], self.model["height"]); idx = (3, 4, 5)
@@ -249,7 +393,7 @@ class Canvas(QWidget):
 
     def item_at(self, p):
         for c in reversed(self.model["controls"]):
-            if QRect(c["x"] + M, c["y"] + M + TB, c["w"], c["h"]).contains(p):
+            if self._visible(c["name"]) and self.canvas_rect(c["name"]).contains(p):
                 return c["name"]
         return None
 
@@ -275,8 +419,10 @@ class Canvas(QWidget):
                 self.band = (p, p)
 
     def _begin(self, mode, p, handle=None):
+        movers = self._top_level(self.sel) if mode == "move" else self.sel      # Kinder wandern mit ihrem Container
         self.drag = dict(mode=mode, start=p, handle=handle, pushed=False,
-                         orig={s: (c["x"], c["y"], c["w"], c["h"]) for s in self.sel for c in [self.control(s)]},
+                         orig={s: (c["x"], c["y"], c["w"], c["h"]) for s in movers for c in [self.control(s)]},
+                         abs0={s: self.canvas_rect(s).topLeft() - QPoint(M, M + TB) for s in movers},
                          form=(self.model["width"], self.model["height"]))
 
     def mouseDoubleClickEvent(self, e):
@@ -288,8 +434,8 @@ class Canvas(QWidget):
         p = e.position().toPoint()
         if self.band:
             self.band = (self.band[0], p)
-            r = QRect(*self.band).normalized().translated(-M, -(M + TB))
-            self.set_sel([c["name"] for c in self.model["controls"] if r.intersects(QRect(c["x"], c["y"], c["w"], c["h"]))])
+            r = QRect(*self.band).normalized()
+            self.set_sel([c["name"] for c in self.model["controls"] if self._visible(c["name"]) and r.intersects(self.canvas_rect(c["name"]))])
             self.overlay.update()
             return
         d = self.drag
@@ -309,9 +455,14 @@ class Canvas(QWidget):
         self.owner.changed("canvas")
         self.overlay.update()
 
-    def _targets(self):
-        xs, ys = [10, self.model["width"] - 10], [10, self.model["height"] - 10]
-        for c in self.model["controls"]:
+    def _targets(self, parent, tab):
+        """Fanglinien innerhalb eines Containers: dessen Rand und die Kanten der Geschwister."""
+        if parent is None:
+            pw, ph = self.model["width"], self.model["height"]
+        else:
+            h = self._holder(parent, tab); pw, ph = h.width(), h.height()
+        xs, ys = [10, pw - 10], [10, ph - 10]
+        for c in layouts.children(self.model, parent, tab):
             if c["name"] in self.sel:
                 continue
             xs += [c["x"], c["x"] + c["w"] // 2, c["x"] + c["w"]]; ys += [c["y"], c["y"] + c["h"] // 2, c["y"] + c["h"]]
@@ -321,21 +472,31 @@ class Canvas(QWidget):
         o = self.drag["orig"]
         bx, by = min(v[0] for v in o.values()), min(v[1] for v in o.values())
         bw, bh = max(v[0] + v[2] for v in o.values()) - bx, max(v[1] + v[3] for v in o.values()) - by
-        xs, ys = self._targets()
+        first = self.control(next(iter(o)))
+        parent = first.get("parent")
+        tab = layouts.tab_of(first, self.control(parent) if parent else None)
+        in_layout = self._layout_mode(parent) != "Keine"
+        xs, ys = self._targets(parent, tab)
+        org = self.origin(parent, tab)
         out = []
-        for start, size, delta, targets, kind in ((bx, bw, dx, xs, "v"), (by, bh, dy, ys, "h")):
+        for start, size, delta, targets, kind, off in ((bx, bw, dx, xs, "v", org.x()), (by, bh, dy, ys, "h", org.y())):
             pos = start + delta
-            cands = [(t - m, t) for m in (pos, pos + size // 2, pos + size) for t in targets if abs(t - m) <= SNAP]
+            cands = [] if in_layout else [(t - m, t) for m in (pos, pos + size // 2, pos + size) for t in targets if abs(t - m) <= SNAP]
             if cands:
                 adj, line = min(cands, key=lambda a: abs(a[0]))
-                pos += adj; self.guides.append((kind, line))
-            else:
+                pos += adj; self.guides.append((kind, line + off))
+            elif not in_layout:
                 pos = self._grid(pos)
             out.append(pos - start)
         for cid, (x, y, w, h) in o.items():
             c = self.control(cid)
             c["x"], c["y"] = x + out[0], y + out[1]
-            self.items[cid].move(c["x"], c["y"])
+        for par in {self.control(cid).get("parent") for cid in o}:
+            if self._layout_mode(par) != "Keine":
+                self._apply_layouts(par)                                          # Reihenfolge im Layout folgt der Position
+        for cid in o:
+            if self._layout_mode(self.control(cid).get("parent")) == "Keine":
+                self.items[cid].move(self.control(cid)["x"], self.control(cid)["y"])
 
     def _do_resize(self, dx, dy):
         d = self.drag
@@ -360,8 +521,37 @@ class Canvas(QWidget):
         self.items[cid].setGeometry(l, t, r - l, b - t)
 
     def mouseReleaseEvent(self, e):
+        d = self.drag
+        if d and d["mode"] == "move" and d["pushed"]:
+            self._drop_into_container(d, e.position().toPoint())
         self.drag, self.band, self.guides = None, None, []
         self.overlay.update()
+
+    def _drop_into_container(self, d, p):
+        """Nach dem Verschieben: liegt der Mauszeiger über einem anderen Container, wandert das Control (samt Kindern) hinein."""
+        movers = list(d["orig"])
+        parent, tab = self.container_at(p, exclude=set(layouts.with_descendants(self.model, movers)))
+        delta = p - d["start"]
+        moved = []
+        for cid in movers:
+            c = self.control(cid)
+            cur = c.get("parent")
+            ptype = self.control(parent)["type"] if parent else None
+            if cur == parent and (ptype != "TabWidget" or layouts.tab_of(c, self.control(parent)) == tab):
+                continue
+            ab = d["abs0"][cid] + delta - self.origin(parent, tab)
+            c["x"], c["y"] = max(0, self._grid(ab.x())), max(0, self._grid(ab.y()))
+            c.pop("parent", None); c.pop("tab", None)
+            if parent:
+                c["parent"] = parent
+                if ptype == "TabWidget":
+                    c["tab"] = tab
+            moved.append(cid)
+        if moved:                                      # Eltern müssen vor ihren Kindern stehen: Verschobene ans Ende
+            keep = set(layouts.with_descendants(self.model, moved))
+            ctrls = self.model["controls"]
+            ctrls[:] = [c for c in ctrls if c["name"] not in keep] + [c for c in ctrls if c["name"] in keep]
+            self.rebuild(); self.owner.changed("canvas")
 
     def keyPressEvent(self, e):
         step = GRID if e.modifiers() & Qt.ShiftModifier else 1
@@ -372,8 +562,8 @@ class Canvas(QWidget):
             dx = {Qt.Key_Left: -step, Qt.Key_Right: step}.get(k, 0)
             dy = {Qt.Key_Up: -step, Qt.Key_Down: step}.get(k, 0)
             self.push_undo()
-            for s in self.sel:
-                c = self.control(s); c["x"] += dx; c["y"] += dy; self.items[s].move(c["x"], c["y"])
+            for s in self._top_level(self.sel):
+                c = self.control(s); c["x"] += dx; c["y"] += dy; self._place(c)
             self.overlay.update(); self.owner.changed("canvas")
         else:
             super().keyPressEvent(e)
@@ -386,8 +576,10 @@ class Canvas(QWidget):
 
     def dropEvent(self, e):
         ctype = bytes(e.mimeData().data(MIME)).decode()
-        p = e.position().toPoint() - QPoint(M, M + TB)
-        self.add_control(ctype, (p.x(), p.y()))
+        cp = e.position().toPoint()
+        parent, tab = self.container_at(cp)
+        p = cp - QPoint(M, M + TB) - self.origin(parent, tab)
+        self.add_control(ctype, (p.x(), p.y()), parent, tab)
         self.setFocus(); e.acceptProposedAction()
 
     def paintEvent(self, e):

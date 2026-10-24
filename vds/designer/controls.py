@@ -7,7 +7,8 @@ from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (QCalendarWidget, QCheckBox, QComboBox, QCommandLinkButton, QDateEdit, QDateTimeEdit, QDial, QDialogButtonBox,
                                QDoubleSpinBox, QFontComboBox, QFrame, QGroupBox, QKeySequenceEdit, QLabel, QLCDNumber, QLineEdit, QListView,
                                QListWidget, QMenuBar, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QScrollBar, QSlider, QSpinBox, QStatusBar,
-                               QTableView, QTableWidget, QTextBrowser, QTimeEdit, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem)
+                               QTableView, QTableWidget, QTabWidget, QTextBrowser, QTimeEdit, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem)
+from .layouts import LAYOUT_DEFAULTS, LAYOUT_KEYS, LAYOUTS
 
 
 class Raw:
@@ -83,8 +84,10 @@ SPECS = [
     # --- Dialoge
     Spec("DialogButtonBox", QDialogButtonBox, (220, 32), "buttonBox", [], {}, ("accepted", "accepted", []), "Dialoge"),
     # --- Container
-    Spec("GroupBox", QGroupBox, (200, 120), "groupBox", ["title"], {"title": "@name"}, category="Container"),
-    Spec("Panel", QFrame, (200, 120), "panel", [], {}, category="Container"),
+    Spec("GroupBox", QGroupBox, (200, 120), "groupBox", ["title", *LAYOUT_KEYS], {"title": "@name", **LAYOUT_DEFAULTS}, category="Container"),
+    Spec("Panel", QFrame, (200, 120), "panel", list(LAYOUT_KEYS), dict(LAYOUT_DEFAULTS), category="Container"),
+    Spec("TabWidget", QTabWidget, (260, 160), "tabControl", ["tabs", "current", *LAYOUT_KEYS],
+         {"tabs": ["Tab 1", "Tab 2"], "current": 0, **LAYOUT_DEFAULTS}, ("currentChanged", "tab_changed", ["index"]), "Container"),
 ]
 CATEGORIES = ["Allgemeine Steuerelemente", "Eingabe", "Anzeige", "Daten", "Menüs und Leisten", "Dialoge", "Container"]
 BY_TYPE = {s.type: s for s in SPECS}
@@ -104,9 +107,11 @@ PROP_INFO = {
     "enabled": ("Enabled", "bool", "Verhalten"), "visible": ("Visible", "bool", "Verhalten"),
     "readonly": ("ReadOnly", "bool", "Verhalten"), "checked": ("Checked", "bool", "Verhalten"),
     "tooltip": ("ToolTip", "str", "Verhalten"), "items": ("Items (Komma-getrennt)", "items", "Daten"),
+    "layout": ("Layout", "choice", "Layout"), "spacing": ("Abstand", "int", "Layout"), "margin": ("Rand", "int", "Layout"),
+    "grid_columns": ("Rasterspalten", "int", "Layout"), "tabs": ("Tabs (Komma-getrennt)", "items", "Daten"), "current": ("Aktiver Tab", "int", "Verhalten"),
     "minimum": ("Minimum", "int", "Daten"), "maximum": ("Maximum", "int", "Daten"), "value": ("Value", "int", "Daten"),
 }
-CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"]}
+CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"], "layout": LAYOUTS}
 
 
 KIND_DEFAULT = {"str": "", "int": 0, "bool": False, "items": [], "choice": "", "color": "", "font": ""}
@@ -140,6 +145,10 @@ def calls(ctype: str, key: str, val):
     if key == "items" and ctype == "TreeWidget":
         code = "[" + ", ".join(f"QTreeWidgetItem([{t!r}])" for t in val) + "]"
         return [("clear", ()), ("setHeaderHidden", (True,)), ("addTopLevelItems", (Raw(code, [QTreeWidgetItem([t]) for t in val]),))]
+    if key in LAYOUT_KEYS or key == "tabs":          # strukturell: Canvas bzw. Codegenerator bauen Layouts und Seiten
+        return []
+    if key == "current":
+        return [("setCurrentIndex", (val,))]
     if key == "password":
         mode = "Password" if val else "Normal"
         return [("setEchoMode", (Raw(f"QLineEdit.{mode}", getattr(QLineEdit, mode)),))]

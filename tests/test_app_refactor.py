@@ -1,8 +1,15 @@
 """Hauptfenster: Umbenennen (mit Language Server und als Textrückfall), Verweise suchen."""
+import pytest
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from vds import refactor
 from vds.app import MainWindow
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_prompts(monkeypatch):
+    """Beim Schließen geänderter Tabs fragt das Programm modal nach; im Test verwerfen wir einfach."""
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Discard))
 
 
 def _open(w, pump, root, names):
@@ -47,7 +54,7 @@ def test_text_rename_fallback_without_language_server(qapp, pump, tmp_path, monk
     w.set_root(tmp_path)
     d = w.docs.open(tmp_path / "lib.rs")
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("doppelt", True)))
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))   # Rename im ganzen Projekt
     monkeypatch.setattr(refactor.PreviewDialog, "exec", lambda self: 1)
     _cursor_on(d.view, 0, 5)
     w.rename_symbol()
