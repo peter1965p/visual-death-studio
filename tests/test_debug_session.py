@@ -83,3 +83,26 @@ def test_python_module_launch_debugs_a_single_test(qapp, pump, tmp_path):
     s, log = _run(qapp, pump, spec, tmp_path, {str(tmp_path / "rechner.py"): [Bp(3)]}, on_pause)
     assert log["paused"][0][0] == "breakpoint" and log["frames"][0] == ("add", 3)
     assert seen["locals"]["ergebnis"] == "5" and log["ended"] == 0
+
+
+@needs("gdb")
+@needs("rustc")
+def test_rust_breakpoint_locals_and_exit(qapp, pump, tmp_path):
+    src = tmp_path / "prog.rs"
+    src.write_text('fn fak(n: u32) -> u32 {\n    let mut e = 1;\n    for i in 2..=n {\n        e *= i;\n    }\n    e\n}\n\nfn main() {\n    println!("fertig {}", fak(4));\n}\n')
+    import subprocess
+    subprocess.run(["rustc", "-g", str(src), "-o", str(tmp_path / "prog")], check=True, cwd=tmp_path)
+    seen = {}
+
+    def on_pause(s, n, reason):
+        if n == 1:
+            s.scopes(lambda sc: [s.variables(ref, lambda vs, nm=nm: seen.setdefault(nm, {v["name"]: v["value"] for v in vs})) for nm, ref in sc if nm != "Registers"])
+            from time import sleep; qapp.processEvents(); sleep(0.4); qapp.processEvents()
+            s.set_breakpoints(str(src), []); s.resume()
+        else:
+            s.resume()
+    s, log = _run(qapp, pump, native_spec(tmp_path / "prog", tmp_path), tmp_path, {str(src): [Bp(4)]}, on_pause, secs=60)
+    assert log["paused"] and log["paused"][0][0] == "breakpoint"
+    assert log["frames"][0][0].endswith("fak")
+    assert seen.get("Arguments", {}).get("n") == "4" or seen.get("Locals", {}).get("n") == "4" or "4" in str(seen)
+    assert log["ended"] == 0 and "fertig 24" in "".join(log["out"])
