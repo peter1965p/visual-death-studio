@@ -1082,7 +1082,7 @@ class MainWindow(QMainWindow):
         from . import __version__
         QMessageBox.about(self, APP_NAME, f"<h3>{APP_NAME} {__version__}</h3>"
                           "<p>Eine Qt-IDE mit Neon-Oberfläche, Formular-Designer, Debugger, IntelliSense und Claude-Anbindung.</p>"
-                          f"<p>Python {platform.python_version()} · PySide6 {PySide6.__version__}<br>MIT-Lizenz · © 2026 peter1965p</p>"
+                          f"<p>Python {platform.python_version()} · PySide6 {PySide6.__version__}<br>MIT-Lizenz · © 2026 Päffgen IT by Peter Päffgen</p>"
                           f"<p><a href='{REPO_URL}'>{REPO_URL}</a></p>")
 
     def getting_started(self):
