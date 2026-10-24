@@ -9,7 +9,7 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 
 ## Funktionen
 
-- **Formular-Designer** mit Toolbox (37 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
+- **Formular-Designer** mit Toolbox (48 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste; Dialoge wie Datei öffnen/speichern, Ordner, Farbe, Schrift, Drucken, Druckvorschau, MessageBox als Komponentenleiste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
 - **Verschachtelung und Layouts** im Designer: Controls in GroupBox, Panel und TabWidget ziehen, Layouts (vertikal, horizontal, Raster) für Formular und Container
 - **Sprachabhängige Codeausschnitte** in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung

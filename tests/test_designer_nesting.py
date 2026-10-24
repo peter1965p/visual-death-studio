@@ -195,3 +195,74 @@ def test_form_layout_via_property(qapp):
     assert cv.surface.layout() is not None
     assert cv.items["button2"].x() > cv.items["button1"].x() and cv.items["button1"].y() == cv.items["button2"].y()
     assert cv.model["layout"] == "Horizontal"
+
+
+# --- Komponenten (Datei-, Druck-, Farbdialoge …) ---------------------------------------------------
+def comp(ctype, name=None, **props):
+    spec = BY_TYPE[ctype]
+    name = name or spec.base + "1"
+    return {"type": ctype, "name": name, "props": {**new_props(spec, name), **props}}
+
+
+def test_dialog_category_has_file_print_and_friends():
+    from vds.designer.controls import SPECS
+    names = {s.type for s in SPECS if s.category == "Dialoge"}
+    assert {"OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "ColorDialog", "FontDialog", "InputDialog", "MessageBox",
+            "ProgressDialog", "PrintDialog", "PrintPreviewDialog", "PageSetupDialog", "DialogButtonBox"} <= names
+    assert all(BY_TYPE[n].component for n in names - {"DialogButtonBox"})
+
+
+def test_generated_code_creates_every_dialog_component(qapp, tmp_path):
+    types = [s.type for s in BY_TYPE.values() if s.component]
+    m = model(ctl("Button", "button1", 10, 10), components=[comp(t) for t in types])
+    m["components"][0]["props"].update(filter="Bilder (*.png *.jpg)", multiselect=True, directory="/tmp")
+    codegen.write_files(tmp_path / "F.form.json", m)
+    src = (tmp_path / "F_designer.py").read_text()
+    assert "from PySide6.QtPrintSupport import" in src and "QPrintDialog" in src and "QPrinter" in src
+    expr = ("f.openFileDialog1.fileMode().name, f.openFileDialog1.nameFilters(), f.saveFileDialog1.acceptMode().name, f.folderBrowserDialog1.fileMode().name, "
+            "f.colorDialog1.currentColor().name(), f.messageBox1.icon().name, f.progressDialog1.maximum(), f.progressDialog1.isVisible(), "
+            "type(f.printDialog1).__name__, type(f.printPreviewDialog1).__name__, type(f.pageSetupDialog1).__name__, f.printDialog1.printer() is f.printDialog1_printer, "
+            "f.openFileDialog1.parent() is f")
+    out = run_generated(tmp_path, m, expr)
+    assert out == ("ExistingFiles ['Bilder (*.png *.jpg)'] AcceptSave Directory #ffffff Information 100 False "
+                   "QPrintDialog QPrintPreviewDialog QPageSetupDialog True True")
+
+
+def test_form_without_components_does_not_import_print_support():
+    m = model(ctl("Button", "button1", 10, 10))
+    assert "QtPrintSupport" not in codegen.widget_imports(m)
+    assert "Komponenten" not in codegen.designer_source(m, "F")
+
+
+def test_canvas_adds_selects_renames_and_deletes_components(qapp):
+    d, cv = make(qapp, ctl("Button", "button1", 10, 10))
+    base_h = cv.height()
+    cv.add_control("OpenFileDialog")                                      # Doppelklick/Drop landen in der Komponentenleiste
+    cv.add_control("PrintDialog")
+    names = [c["name"] for c in cv.model["components"]]
+    assert names == ["openFileDialog1", "printDialog1"] and [c["name"] for c in cv.model["controls"]] == ["button1"]
+    assert cv.height() > base_h and cv.sel == ["printDialog1"]
+    r = cv.tray_rects()["openFileDialog1"]
+    press_drag_release(cv, r.center(), r.center())                         # Klick auf den Chip wählt die Komponente
+    assert cv.sel == ["openFileDialog1"]
+    assert cv.set_prop("openFileDialog1", "filter", "Text (*.txt)") and cv.component("openFileDialog1")["props"]["filter"] == "Text (*.txt)"
+    assert not cv.set_prop("openFileDialog1", "name", "button1")           # Namen sind projektweit eindeutig
+    assert cv.set_prop("openFileDialog1", "name", "oeffnen") and cv.sel == ["oeffnen"]
+    cv.copy(); cv.paste()
+    assert [c["name"] for c in cv.model["components"]][-1] == "openFileDialog1" and len(cv.model["components"]) == 3
+    cv.set_sel(["oeffnen"]); cv.delete_selected()
+    assert "oeffnen" not in [c["name"] for c in cv.model["components"]]
+    cv.undo()
+    assert "oeffnen" in [c["name"] for c in cv.model["components"]]
+    cv.select_all(); cv.delete_selected()
+    assert cv.model["controls"] == [] and len(cv.model["components"]) == 3         # „Alles auswählen“ meint nur sichtbare Controls
+
+
+def test_properties_grid_lists_component_properties(qapp):
+    from vds.docks.props import PropertiesDock
+    d, cv = make(qapp, ctl("Button", "button1", 10, 10), components=[comp("MessageBox")])
+    dock = PropertiesDock(); dock.show_designer(d)
+    cv.set_sel(["messageBox1"])
+    labels = [dock.grid.item(r, 0).text() for r in range(dock.grid.rowCount()) if dock.grid.item(r, 0)]
+    assert "Symbol" in labels and "Schaltflächen" in labels and "Location X" not in labels
+    assert dock.combo.count() == 3 and dock.combo.currentText().startswith("messageBox1")

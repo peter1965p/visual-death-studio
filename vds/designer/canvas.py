@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout
 from shiboken6 import delete as delete_qobject
 
 from . import layouts
+from ..icons import control_icon
 from .controls import BY_TYPE, apply_prop, font_decls, make_widget, new_props
 from .layouts import CONTAINERS, LAYOUT_KEYS
 
@@ -17,6 +18,7 @@ CURSORS = [Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorC
            Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorCursor]
 MIME = "application/x-vds-control"
 GUIDE = QColor("#e040a0")
+TRAY_H, CHIP_W = 36, 156                       # Komponentenleiste unter dem Formular
 
 LIGHT = """
 #formsurface QPushButton { background:#e1e1e1; color:#000; border:1px solid #adadad; padding:2px 8px; border-radius:0; }
@@ -93,6 +95,7 @@ class Canvas(QWidget):
     # --- Modell -----------------------------------------------------------------
     def load(self, model):
         self.model = model
+        model.setdefault("components", [])
         layouts.normalize(model)
         self.undo_stack.clear(); self.redo_stack.clear()
         self.rebuild()
@@ -105,7 +108,7 @@ class Canvas(QWidget):
         if old is not None:
             delete_qobject(old)
         self._build(None)
-        self.sel = [s for s in self.sel if s in self.items]
+        self.sel = [s for s in self.sel if s in self.items or self.component(s)]
         self.relayout()
         self._apply_layouts()
 
@@ -188,7 +191,8 @@ class Canvas(QWidget):
 
     def relayout(self):
         m = self.model
-        self.setFixedSize(m["width"] + 2 * M, m["height"] + TB + 2 * M)
+        comps = len(m.get("components", []))
+        self.setFixedSize(max(m["width"] + 2 * M, comps * CHIP_W + 2 * M), m["height"] + TB + 2 * M + (TRAY_H + 10 if comps else 0))
         self.surface.setGeometry(M, M + TB, m["width"], m["height"])
         c = QColor(m.get("back_color") or "#f0f0f0")
         self.surface.bg = c if c.isValid() else QColor("#f0f0f0")
@@ -197,8 +201,15 @@ class Canvas(QWidget):
         self.overlay.setGeometry(self.rect()); self.overlay.raise_()
         self.update(); self.overlay.update()
 
+    def component(self, cid):
+        return next((c for c in self.model.get("components", []) if c["name"] == cid), None)
+
     def control(self, cid):
-        return next((c for c in self.model["controls"] if c["name"] == cid), None)
+        return next((c for c in self.model["controls"] if c["name"] == cid), None) or self.component(cid)
+
+    def tray_rects(self) -> dict:
+        y = M + TB + self.model["height"] + 14
+        return {c["name"]: QRect(M + i * CHIP_W, y, CHIP_W - 6, TRAY_H - 6) for i, c in enumerate(self.model.get("components", []))}
 
     def canvas_rect(self, cid) -> QRect:
         w = self.items[cid]
@@ -241,7 +252,7 @@ class Canvas(QWidget):
             self.undo_stack.append(self._snapshot()); self._restore(self.redo_stack.pop())
 
     def unique_name(self, base):
-        names = {c["name"] for c in self.model["controls"]}
+        names = {c["name"] for c in self.model["controls"] + self.model.get("components", [])}
         n = 1
         while f"{base}{n}" in names:
             n += 1
@@ -251,6 +262,8 @@ class Canvas(QWidget):
     def add_control(self, ctype, pos=None, parent=None, tab=0):
         """pos: Position relativ zum Container `parent` (None = Formular)."""
         spec = BY_TYPE[ctype]
+        if spec.component:
+            return self.add_component(ctype)
         if pos is None:
             sel = self.control(self.sel[0]) if len(self.sel) == 1 else None
             if sel and sel["type"] in CONTAINERS:                           # Doppelklick in der Toolbox: in den gewählten Container
@@ -270,6 +283,15 @@ class Canvas(QWidget):
         self.model["controls"].append(c)
         self._create_widget(c)
         self._place(c)
+        self.set_sel([name]); self.owner.changed("add")
+
+    def add_component(self, ctype):
+        """Nicht visuelle Komponente (Datei-, Druck-, Farbdialog …): landet in der Komponentenleiste unter dem Formular."""
+        spec = BY_TYPE[ctype]
+        self.push_undo()
+        name = self.unique_name(spec.base)
+        self.model["components"].append({"type": ctype, "name": name, "props": new_props(spec, name)})
+        self.relayout()
         self.set_sel([name]); self.owner.changed("add")
 
     def set_sel(self, ids):
@@ -296,20 +318,26 @@ class Canvas(QWidget):
         self.push_undo()
         gone = set(layouts.with_descendants(self.model, self.sel))
         self.model["controls"] = [c for c in self.model["controls"] if c["name"] not in gone]
+        self.model["components"] = [c for c in self.model["components"] if c["name"] not in self.sel]
         self.set_sel([]); self.rebuild(); self.owner.changed("delete")
 
     def copy(self):
         names = layouts.with_descendants(self.model, self._top_level(self.sel))
         self.clipboard = [copy.deepcopy(self.control(n)) for n in names]
+        self.clip_comps = [copy.deepcopy(c) for c in self.model["components"] if c["name"] in self.sel]
 
     def cut(self):
         self.copy(); self.delete_selected()
 
     def paste(self):
-        if not self.clipboard:
+        if not self.clipboard and not getattr(self, "clip_comps", None):
             return
         self.push_undo()
         mapping, new = {}, []
+        for src in getattr(self, "clip_comps", []):
+            c = copy.deepcopy(src)
+            c["name"] = self.unique_name(BY_TYPE[c["type"]].base)
+            self.model["components"].append(c); new.append(c["name"])
         for src in self.clipboard:
             c = copy.deepcopy(src)
             c["name"] = self.unique_name(BY_TYPE[c["type"]].base)
@@ -348,9 +376,11 @@ class Canvas(QWidget):
         else:
             c = self.control(cid)
             if key == "name":
-                if not str(value).isidentifier() or any(x["name"] == value for x in self.model["controls"] if x is not c):
+                if not str(value).isidentifier() or any(x["name"] == value for x in self.model["controls"] + self.model["components"] if x is not c):
                     return False
-                self.push_undo(); c["name"] = value; self.items[value] = self.items.pop(cid)
+                self.push_undo(); c["name"] = value
+                if cid in self.items:
+                    self.items[value] = self.items.pop(cid)
                 if cid in self.pages:
                     self.pages[value] = self.pages.pop(cid)
                 for x in self.model["controls"]:
@@ -368,9 +398,9 @@ class Canvas(QWidget):
                 c["props"][key] = value
                 if key in LAYOUT_KEYS or key in ("tabs", "current"):         # strukturelle Eigenschaften: Fläche neu aufbauen
                     self.rebuild()
-                else:
+                elif cid in self.items:
                     apply_prop(self.items[cid], c["type"], key, value, c["props"])
-        self.overlay.update()
+        self.overlay.update(); self.update()
         self.owner.changed(source)
         return True
 
@@ -403,6 +433,9 @@ class Canvas(QWidget):
         if e.button() != Qt.LeftButton:
             return
         p = e.position().toPoint()
+        for name, r in self.tray_rects().items():
+            if r.contains(p):
+                return self.set_sel([name])
         for i, r in self.handle_rects().items():
             if r.adjusted(-2, -2, 2, 2).contains(p):
                 return self._begin("resize", p, i)
@@ -562,7 +595,7 @@ class Canvas(QWidget):
             dx = {Qt.Key_Left: -step, Qt.Key_Right: step}.get(k, 0)
             dy = {Qt.Key_Up: -step, Qt.Key_Down: step}.get(k, 0)
             self.push_undo()
-            for s in self._top_level(self.sel):
+            for s in (n for n in self._top_level(self.sel) if n in self.items):
                 c = self.control(s); c["x"] += dx; c["y"] += dy; self._place(c)
             self.overlay.update(); self.owner.changed("canvas")
         else:
@@ -577,6 +610,9 @@ class Canvas(QWidget):
     def dropEvent(self, e):
         ctype = bytes(e.mimeData().data(MIME)).decode()
         cp = e.position().toPoint()
+        if BY_TYPE[ctype].component:
+            self.add_component(ctype); self.setFocus(); e.acceptProposedAction()
+            return
         parent, tab = self.container_at(cp)
         p = cp - QPoint(M, M + TB) - self.origin(parent, tab)
         self.add_control(ctype, (p.x(), p.y()), parent, tab)
@@ -595,6 +631,16 @@ class Canvas(QWidget):
         p.drawText(QRect(M + w - 92, M, 46, TB), Qt.AlignCenter, "□")
         p.drawText(QRect(M + w - 46, M, 46, TB), Qt.AlignCenter, "✕")
         p.setPen(QColor("#888")); p.drawRect(M - 1, M - 1, w + 1, self.model["height"] + TB + 1)
+        rects = self.tray_rects()
+        if rects:
+            p.setPen(QColor("#6f82ad")); p.drawText(M, M + TB + self.model["height"] + 12, "Komponenten")
+            for c in self.model["components"]:
+                r = rects[c["name"]]
+                on = c["name"] in self.sel
+                p.setBrush(QColor("#1b2a5c" if on else "#121a3d")); p.setPen(QPen(QColor("#00e5ff" if on else "#33427a"), 1.4 if on else 1))
+                p.drawRoundedRect(r, 6, 6)
+                control_icon(c["type"]).paint(p, QRect(r.x() + 6, r.y() + 6, 16, 16))
+                p.setPen(QColor("#dbe6ff")); p.drawText(r.adjusted(28, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, c["name"])
 
 
 class FormDesigner(QWidget):

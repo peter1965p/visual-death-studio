@@ -18,14 +18,14 @@ def test_catalog_is_complete_and_categorised():
 def test_every_control_can_be_created_live(qapp):
     from PySide6.QtWidgets import QWidget
     parent = QWidget()
-    for spec in SPECS:
+    for spec in (x for x in SPECS if not x.component):
         w = make_widget(spec.type, new_props(spec, spec.base + "1"), parent)
         assert w is not None, spec.type
 
 
 def test_generated_form_with_every_control_compiles_and_runs(qapp, tmp_path):
     controls = []
-    for i, spec in enumerate(SPECS):
+    for i, spec in enumerate(x for x in SPECS if not x.component):
         name = spec.base + "1"
         controls.append({"type": spec.type, "name": name, "x": 10 + (i % 4) * 150, "y": 10 + (i // 4) * 60, "w": spec.size[0], "h": spec.size[1],
                          "props": new_props(spec, name)})

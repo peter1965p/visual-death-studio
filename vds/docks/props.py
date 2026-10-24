@@ -123,7 +123,9 @@ class PropertiesDock(QWidget):
         return sel[0] if len(sel) == 1 else None
 
     def _combo_activated(self, i):
-        self.designer.canvas.set_sel([] if i == 0 else [self.designer.model["controls"][i - 1]["name"]])
+        m = self.designer.model
+        names = [c["name"] for c in m["controls"] + m["components"]]
+        self.designer.canvas.set_sel([] if i == 0 else [names[i - 1]])
 
     def _on_designer(self, source="select"):
         if not self.designer:
@@ -138,7 +140,9 @@ class PropertiesDock(QWidget):
             while p in names:
                 depth += 1; p = names[p].get("parent")
             self.combo.addItem(f"{'    ' * depth}{c['name']}  ({c['type']})")
-        self.combo.setCurrentIndex(0 if cur is None else 1 + [c["name"] for c in m["controls"]].index(cur))
+        for c in m["components"]:
+            self.combo.addItem(f"{c['name']}  ({c['type']})")
+        self.combo.setCurrentIndex(0 if cur is None else 1 + [c["name"] for c in m["controls"] + m["components"]].index(cur))
         self.combo.blockSignals(False)
         if source != "grid":
             self._build_grid(cur)
@@ -198,9 +202,10 @@ class PropertiesDock(QWidget):
         c = cv.control(cid)
         self._section("Design")
         self._row("(Name)", self._edit("str", c["name"], lambda v: self._rename(cid, v)))
-        self._section("Layout")
-        for key, label in (("x", "Location X"), ("y", "Location Y"), ("w", "Width"), ("h", "Height")):
-            self._row(label, self._edit("int", c[key], lambda v, k=key: cv.set_prop(cid, k, v)))
+        if "x" in c:                                                       # Komponenten haben keine Geometrie
+            self._section("Layout")
+            for key, label in (("x", "Location X"), ("y", "Location Y"), ("w", "Width"), ("h", "Height")):
+                self._row(label, self._edit("int", c[key], lambda v, k=key: cv.set_prop(cid, k, v)))
         cats: dict[str, list] = {}
         for k in prop_keys(BY_TYPE[c["type"]]):
             label, kind, cat = PROP_INFO[k]

@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QPixmap
-from PySide6.QtWidgets import (QCalendarWidget, QCheckBox, QComboBox, QCommandLinkButton, QDateEdit, QDateTimeEdit, QDial, QDialogButtonBox,
+from PySide6.QtWidgets import (QColorDialog, QFileDialog, QFontDialog, QInputDialog, QMessageBox, QProgressDialog, QCalendarWidget, QCheckBox, QComboBox, QCommandLinkButton, QDateEdit, QDateTimeEdit, QDial, QDialogButtonBox,
                                QDoubleSpinBox, QFontComboBox, QFrame, QGroupBox, QKeySequenceEdit, QLabel, QLCDNumber, QLineEdit, QListView,
                                QListWidget, QMenuBar, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QScrollBar, QSlider, QSpinBox, QStatusBar,
                                QTableView, QTableWidget, QTabWidget, QTextBrowser, QTimeEdit, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem)
 from .layouts import LAYOUT_DEFAULTS, LAYOUT_KEYS, LAYOUTS
+
+from PySide6.QtPrintSupport import QPageSetupDialog, QPrintDialog, QPrintPreviewDialog
 
 
 class Raw:
@@ -28,6 +30,7 @@ class Spec:
     event: tuple | None = None                 # (qt-signal, handler-suffix, [argnamen])
     category: str = "Allgemeine Steuerelemente"
     imports: tuple = ()                        # zusätzliche Klassen, die der erzeugte Code importieren muss
+    component: bool = False                    # nicht visuell: erscheint in der Komponentenleiste unter dem Formular, hat keine Geometrie
 
 
 SPECS = [
@@ -83,6 +86,23 @@ SPECS = [
     Spec("StatusBar", QStatusBar, (300, 24), "statusBar", ["text"], {"text": "Bereit"}, None, "Menüs und Leisten"),
     # --- Dialoge
     Spec("DialogButtonBox", QDialogButtonBox, (220, 32), "buttonBox", [], {}, ("accepted", "accepted", []), "Dialoge"),
+    *[Spec(t, qt, (0, 0), base, props, defaults, category="Dialoge", imports=imps, component=True) for t, qt, base, props, defaults, imps in [
+        ("OpenFileDialog", QFileDialog, "openFileDialog", ["title", "filter", "directory", "multiselect"],
+         {"title": "Datei öffnen", "filter": "Alle Dateien (*)", "directory": "", "multiselect": False}, ()),
+        ("SaveFileDialog", QFileDialog, "saveFileDialog", ["title", "filter", "directory", "default_suffix"],
+         {"title": "Datei speichern", "filter": "Alle Dateien (*)", "directory": "", "default_suffix": ""}, ()),
+        ("FolderBrowserDialog", QFileDialog, "folderBrowserDialog", ["title", "directory"], {"title": "Ordner wählen", "directory": ""}, ()),
+        ("ColorDialog", QColorDialog, "colorDialog", ["title", "color"], {"title": "Farbe wählen", "color": "#ffffff"}, ("QColor",)),
+        ("FontDialog", QFontDialog, "fontDialog", ["title"], {"title": "Schriftart wählen"}, ()),
+        ("InputDialog", QInputDialog, "inputDialog", ["title", "label", "text"], {"title": "Eingabe", "label": "Wert:", "text": ""}, ()),
+        ("MessageBox", QMessageBox, "messageBox", ["title", "text", "icon", "buttons"],
+         {"title": "Hinweis", "text": "Nachricht", "icon": "Information", "buttons": "Ok"}, ()),
+        ("ProgressDialog", QProgressDialog, "progressDialog", ["title", "label", "minimum", "maximum"],
+         {"title": "Fortschritt", "label": "Bitte warten …", "minimum": 0, "maximum": 100}, ()),
+        ("PrintDialog", QPrintDialog, "printDialog", ["title"], {"title": "Drucken"}, ("QPrinter",)),
+        ("PrintPreviewDialog", QPrintPreviewDialog, "printPreviewDialog", ["title"], {"title": "Druckvorschau"}, ("QPrinter",)),
+        ("PageSetupDialog", QPageSetupDialog, "pageSetupDialog", ["title"], {"title": "Seite einrichten"}, ("QPrinter",)),
+    ]],
     # --- Container
     Spec("GroupBox", QGroupBox, (200, 120), "groupBox", ["title", *LAYOUT_KEYS], {"title": "@name", **LAYOUT_DEFAULTS}, category="Container"),
     Spec("Panel", QFrame, (200, 120), "panel", list(LAYOUT_KEYS), dict(LAYOUT_DEFAULTS), category="Container"),
@@ -109,9 +129,13 @@ PROP_INFO = {
     "tooltip": ("ToolTip", "str", "Verhalten"), "items": ("Items (Komma-getrennt)", "items", "Daten"),
     "layout": ("Layout", "choice", "Layout"), "spacing": ("Abstand", "int", "Layout"), "margin": ("Rand", "int", "Layout"),
     "grid_columns": ("Rasterspalten", "int", "Layout"), "tabs": ("Tabs (Komma-getrennt)", "items", "Daten"), "current": ("Aktiver Tab", "int", "Verhalten"),
+    "filter": ("Filter", "str", "Daten"), "directory": ("Startordner", "str", "Daten"), "multiselect": ("Mehrfachauswahl", "bool", "Verhalten"),
+    "default_suffix": ("Standard-Endung", "str", "Daten"), "color": ("Startfarbe", "color", "Daten"), "label": ("Beschriftung", "str", "Darstellung"),
+    "icon": ("Symbol", "choice", "Darstellung"), "buttons": ("Schaltflächen", "choice", "Verhalten"),
     "minimum": ("Minimum", "int", "Daten"), "maximum": ("Maximum", "int", "Daten"), "value": ("Value", "int", "Daten"),
 }
-CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"], "layout": LAYOUTS}
+CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"], "layout": LAYOUTS,
+           "icon": ["Information", "Warning", "Critical", "Question"], "buttons": ["Ok", "OkCancel", "YesNo", "YesNoCancel"]}
 
 
 KIND_DEFAULT = {"str": "", "int": 0, "bool": False, "items": [], "choice": "", "color": "", "font": ""}
@@ -119,12 +143,14 @@ KIND_DEFAULT = {"str": "", "int": 0, "bool": False, "items": [], "choice": "", "
 
 def new_props(spec: Spec, name: str) -> dict:
     d = {k: KIND_DEFAULT[PROP_INFO[k][1]] for k in prop_keys(spec)}
-    d.update(COMMON_DEFAULTS); d.update(spec.defaults)
+    if not spec.component:
+        d.update(COMMON_DEFAULTS)
+    d.update(spec.defaults)
     return {k: (name if v == "@name" else (list(v) if isinstance(v, list) else v)) for k, v in d.items()}
 
 
 def prop_keys(spec: Spec) -> list:
-    return spec.props + COMMON
+    return spec.props if spec.component else spec.props + COMMON
 
 
 def calls(ctype: str, key: str, val):
@@ -231,3 +257,54 @@ def make_widget(ctype: str, props: dict, parent):
     for k in [k for k in props if k not in order] + [k for k in order if k in props]:
         apply_prop(w, ctype, k, props[k], props)
     return w
+
+
+BUTTONS = {"Ok": "Ok", "OkCancel": "Ok | Cancel", "YesNo": "Yes | No", "YesNoCancel": "Yes | No | Cancel"}
+
+
+def component_lines(c: dict) -> list:
+    """Python-Code (Einrückung für setup_ui) einer nicht-visuellen Komponente; `root` ist das Formular."""
+    t, n, p = c["type"], c["name"], c["props"]
+    v = f"self.{n}"
+    L = []
+    if t in ("OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog"):
+        L.append(f"{v} = QFileDialog(root)")
+        if t == "FolderBrowserDialog":
+            L += [f"{v}.setFileMode(QFileDialog.FileMode.Directory)", f"{v}.setOption(QFileDialog.Option.ShowDirsOnly, True)"]
+        elif t == "OpenFileDialog":
+            L += [f"{v}.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)",
+                  f"{v}.setFileMode(QFileDialog.FileMode.{'ExistingFiles' if p.get('multiselect') else 'ExistingFile'})"]
+        else:
+            L += [f"{v}.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)"]
+            if p.get("default_suffix"):
+                L.append(f"{v}.setDefaultSuffix({p['default_suffix']!r})")
+        if t != "FolderBrowserDialog":
+            L.append(f"{v}.setNameFilter({p.get('filter') or 'Alle Dateien (*)'!r})")
+        if p.get("directory"):
+            L.append(f"{v}.setDirectory({p['directory']!r})")
+        use = f"if {v}.exec():  # Auswahl: {v}.selectedFiles()"
+    elif t == "ColorDialog":
+        L.append(f"{v} = QColorDialog(QColor({p.get('color') or '#ffffff'!r}), root)")
+        use = f"if {v}.exec():  # Auswahl: {v}.selectedColor()"
+    elif t == "FontDialog":
+        L.append(f"{v} = QFontDialog(root)")
+        use = f"if {v}.exec():  # Auswahl: {v}.selectedFont()"
+    elif t == "InputDialog":
+        L += [f"{v} = QInputDialog(root)", f"{v}.setLabelText({p.get('label', '')!r})", f"{v}.setTextValue({p.get('text', '')!r})"]
+        use = f"if {v}.exec():  # Eingabe: {v}.textValue()"
+    elif t == "MessageBox":
+        L += [f"{v} = QMessageBox(root)", f"{v}.setText({p.get('text', '')!r})", f"{v}.setIcon(QMessageBox.Icon.{p.get('icon', 'Information')})",
+              "{0}.setStandardButtons({1})".format(v, " | ".join("QMessageBox.StandardButton." + b.strip() for b in BUTTONS.get(p.get("buttons"), "Ok").split("|")))]
+        use = f"result = {v}.exec()  # Vergleich: QMessageBox.StandardButton.Yes usw."
+    elif t == "ProgressDialog":
+        L += [f"{v} = QProgressDialog({p.get('label', '')!r}, 'Abbrechen', {int(p.get('minimum', 0))}, {int(p.get('maximum', 100))}, root)",
+              f"{v}.setWindowModality(Qt.WindowModality.WindowModal)", f"{v}.reset()  # zeigt sich erst bei {v}.setValue(...)"]
+        use = f"{v}.setValue(50)"
+    else:                                                       # Druckdialoge brauchen einen QPrinter
+        cls = {"PrintDialog": "QPrintDialog", "PrintPreviewDialog": "QPrintPreviewDialog", "PageSetupDialog": "QPageSetupDialog"}[t]
+        L += [f"{v}_printer = QPrinter()", f"{v} = {cls}({v}_printer, root)"]
+        use = (f"{v}.paintRequested.connect(<eigener Slot>), dann {v}.exec()  # der Slot zeichnet auf den übergebenen Drucker"
+               if t == "PrintPreviewDialog" else f"if {v}.exec():  # gedruckt wird auf {v}_printer")
+    i = next(k for k, line in enumerate(L) if line.startswith(f"{v} = "))
+    L[i + 1:i + 1] = [f"{v}.setObjectName({n!r})", f"{v}.setWindowTitle({p.get('title', '')!r})"]
+    return L + [f"# Aufruf: {use}"]

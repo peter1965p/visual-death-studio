@@ -4,14 +4,14 @@ import re
 from pathlib import Path
 
 from . import layouts
-from .controls import BY_TYPE, COLOR_KEYS, Raw, calls, prop_keys, style_for
+from .controls import BY_TYPE, COLOR_KEYS, Raw, calls, component_lines, prop_keys, style_for
 from .layouts import CONTAINERS
 
 HEADER = "# Automatisch von Visual Death Studio erzeugt – Änderungen gehen beim nächsten Speichern des Designers verloren.\n"
 
 
 def new_form(name="Form1"):
-    return {"name": name, "title": name, "width": 480, "height": 320, "controls": []}
+    return {"name": name, "title": name, "width": 480, "height": 320, "controls": [], "components": []}
 
 
 def class_name(stem: str) -> str:
@@ -47,22 +47,28 @@ def widget_imports(model: dict) -> str:
             names.add("QWidget")
         if any(k in c["props"] for k in ("password",)):
             names.add("QLineEdit")
+    for c in model.get("components", []):
+        spec = BY_TYPE[c["type"]]
+        names.add(spec.qt.__name__); names.update(spec.imports)
     for src in [model] + [c["props"] for c in model["controls"] if c["type"] in CONTAINERS]:
         mode = layouts.cfg(src)[0]
         if mode != "Keine":
             names.add(layouts.LAYOUT_CLASS[mode])
-    from PySide6 import QtWidgets
-    items = sorted(n for n in names if hasattr(QtWidgets, n))      # Klassen aus QtGui (z. B. QPixmap) sind bereits importiert
-    if not items:
-        return ""
-    lines, cur = [], ""
-    for n in items:
-        piece = n + ", "
-        if len(cur) + len(piece) > 100:
-            lines.append(cur.rstrip()); cur = ""
-        cur += piece
-    lines.append(cur.rstrip().rstrip(","))
-    return "from PySide6.QtWidgets import (" + ("\n" + " " * 31).join(lines) + ")\n"
+    from PySide6 import QtPrintSupport, QtWidgets
+    out = ""
+    for mod, label in ((QtWidgets, "QtWidgets"), (QtPrintSupport, "QtPrintSupport")):      # QtGui-Klassen (z. B. QPixmap) sind bereits importiert
+        items = sorted(n for n in names if hasattr(mod, n) and (mod is QtPrintSupport or not hasattr(QtPrintSupport, n)))
+        if not items:
+            continue
+        lines, cur = [], ""
+        for n in items:
+            piece = n + ", "
+            if len(cur) + len(piece) > 100:
+                lines.append(cur.rstrip()); cur = ""
+            cur += piece
+        lines.append(cur.rstrip().rstrip(","))
+        out += f"from PySide6.{label} import (" + ("\n" + " " * (len(label) + 20)).join(lines) + ")\n"
+    return out
 
 
 def _layout_lines(holder: str, src: dict, kids: list) -> list:
@@ -136,6 +142,11 @@ def designer_source(model: dict, cls: str) -> str:
     if model.get("back_color"):
         L.append(f"        _p = root.palette(); _p.setColor(QPalette.Window, QColor({model['back_color']!r})); root.setPalette(_p); root.setAutoFillBackground(True)\n")
     _emit_level(L, model, None, "root")
+    comps = model.get("components", [])
+    if comps:
+        L.append("\n        # --- Komponenten (nicht sichtbar): mit exec() anzeigen\n")
+        for c in comps:
+            L += ["        " + line + "\n" for line in component_lines(c)] + ["\n"]
     return "".join(L).rstrip("\n") + "\n"
 
 
