@@ -372,7 +372,7 @@ class Canvas(QWidget):
     def set_prop(self, cid, key, value, source="grid"):
         """cid None = Formular. Rückgabe: True, wenn übernommen."""
         if cid is None:
-            if key in ("title", "back_color", "font") or key in LAYOUT_KEYS:
+            if key in ("title", "back_color", "font", "target") or key in LAYOUT_KEYS:
                 pass
             elif key not in ("width", "height"):
                 return False

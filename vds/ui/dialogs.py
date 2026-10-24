@@ -207,3 +207,45 @@ class TextDialog(QDialog):
         self.setWindowTitle(title); self.resize(620, 480)
         view = QPlainTextEdit(text); view.setReadOnly(True)
         lay = QVBoxLayout(self); lay.addWidget(view)
+
+
+def suggest_target(root: Path) -> str:
+    """Passendes Designer-Ziel zum Projektordner: Vue/React aus package.json, sonst Java bei .java-Dateien, sonst Python/Qt."""
+    import json as _json
+    root = Path(root)
+    try:
+        pkg = _json.loads((root / "package.json").read_text(encoding="utf-8"))
+        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+        if "vue" in deps or "nuxt" in deps:
+            return "vue"
+        if "react" in deps or "next" in deps:
+            return "react"
+    except (OSError, ValueError):
+        pass
+    if any(root.glob("*.java")) or (root / "src").is_dir() and any((root / "src").rglob("*.java")):
+        return "java-swing"
+    return "python-qt"
+
+
+class NewFormDialog(QDialog):
+    """Neues Formular: Name und Ausgabeziel (Python/Qt, Java Swing, React, Vue)."""
+
+    def __init__(self, root: Path, parent=None):
+        super().__init__(parent)
+        from ..designer import targets
+        self.setWindowTitle("Neues Formular"); self.resize(440, 160)
+        self.name = QLineEdit("Form1")
+        self.target = QComboBox()
+        for tid, label in targets.LABELS.items():
+            self.target.addItem(label, tid)
+        self.target.setCurrentIndex(max(0, self.target.findData(suggest_target(root))))
+        form = QFormLayout()
+        form.addRow("Name", self.name); form.addRow("Zielplattform", self.target)
+        hint = QLabel("Der Designer ist für alle Ziele gleich; erzeugt wird Code für die gewählte Plattform. Das Ziel lässt sich später in den Formular-Eigenschaften ändern.")
+        hint.setWordWrap(True); hint.setStyleSheet("color:#8fa3c7")
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
+        lay = QVBoxLayout(self); lay.addLayout(form); lay.addWidget(hint); lay.addWidget(bb)
+
+    def values(self) -> tuple:
+        return self.name.text().strip(), self.target.currentData()

@@ -1,5 +1,6 @@
 """Hauptfenster: Menüleiste, Toolbar, Docks und Statusleiste im Stil von Visual Studio 2022."""
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
 from .designer import codegen
+from .designer import targets as designer_targets
 from .diff import changes as gitc
 from .diff.view import DiffView
 from .docks.changes import ChangesPanel, DiffRequest
@@ -367,6 +369,7 @@ class MainWindow(QMainWindow):
         self.docs.docOpened.connect(self._code_opened)
         self.docs.docClosed.connect(lambda d: d.kind == "code" and self.lsp.detach(d.path))
         self.docs.saved.connect(lambda d: d.kind == "code" and self.lsp.did_save(d.path))
+        self.docs.saved.connect(self._form_saved)
         self.lsp.diagnostics.connect(self._lsp_diagnostics)
         self.lsp.editRequested.connect(lambda edits, label: self._apply_refactor(edits, label, preview=len(edits) > 1))
         self.p_refs.activated.connect(lambda path, line, col: self.goto(path, line, col))
@@ -475,6 +478,11 @@ class MainWindow(QMainWindow):
         from .ui.options_dialog import OptionsDialog
         OptionsDialog(self).exec()
 
+    def _form_saved(self, d):
+        if d.kind == "form" and d.warnings:
+            self.statusBar().showMessage(f"Hinweis: Für {designer_targets.LABELS[d.target]} werden nicht erzeugt: " + ", ".join(d.warnings[:6])
+                                         + (" …" if len(d.warnings) > 6 else ""), 9000)
+
     def _option_changed(self, key: str):
         self._apply_options(key)
 
@@ -562,7 +570,7 @@ class MainWindow(QMainWindow):
         """Wie in Visual Studio: Gehört zu Form1.py ein Formular (Form1.form.json), öffnet der Doppelklick den Designer.
         Den Code zeigt F7 (Ansicht → Code anzeigen)."""
         form = path.with_name(path.stem + FORM_SUFFIX)
-        if path.suffix == ".py" and form.is_file():
+        if path.suffix in (".py", ".java", ".tsx", ".vue") and form.is_file():
             return self.docs.open(form)
         return self.docs.open(path)
 
@@ -622,8 +630,29 @@ class MainWindow(QMainWindow):
     def save_all(self):
         self.docs.save_all()
 
+    def run_web(self, doc) -> bool:
+        """Formulare mit Web-Ziel (React/Vue) starten den Dev-Server des Projekts (`npm run dev`, bei Bedarf nach `npm install`)."""
+        if not doc or doc.kind != "form" or doc.target not in designer_targets.WEB:
+            return False
+        if self.runner.busy:
+            return True
+        doc.save()
+        folder = next((d for d in [doc.path.parent, *doc.path.parents][:5] if (d / "package.json").exists()), None)
+        self.d_output.show(); self.d_output.raise_(); self.output.clear()
+        if folder is None or not shutil.which("npm"):
+            self.output.append("Zum Starten braucht das Projekt eine package.json (z. B. React/Vue-Vorlage aus dem Projekt-Assistenten) und npm.\n"
+                               + ("" if shutil.which("npm") else dbg_tools.missing_message("npm", "Web-Projekte") + "\n"), "stderr")
+            return True
+        steps = ([(["npm", "install"], folder)] if not (folder / "node_modules").exists() else []) + [(["npm", "run", "dev"], folder)]
+        self.output.append(f"Dev-Server: {' && '.join(' '.join(c) for c, _ in steps)}  (Stopp: Umschalt+F5)\n", "info")
+        self._build_base = folder
+        self.runner.start_steps(steps, group=True)
+        return True
+
     def run(self, mode, debug=False, _retry=False):
         doc = self.docs.current_doc()
+        if self.run_web(doc):
+            return
         if not doc or doc.run_target is None or self.runner.busy:
             return
         self._last_run = (mode, debug)
@@ -924,18 +953,19 @@ class MainWindow(QMainWindow):
 
     # --- Formular-Designer ------------------------------------------------------------
     def new_form(self):
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "Neues Formular", "Name des Formulars:", text="Form1")
-        name = name.strip()
-        if not ok or not name:
+        from .ui.dialogs import NewFormDialog
+        dlg = NewFormDialog(self.root, self)
+        if not dlg.exec():
             return
-        if not codegen.class_name(name).isidentifier():
-            return QMessageBox.warning(self, "Visual Death Studio", "Der Name muss ein gültiger Python-Bezeichner sein.")
-        target = self.explorer._target_dir()
-        path = target / f"{name}{FORM_SUFFIX}"
-        if path.exists() or (target / f"{name}.py").exists():
+        name, target = dlg.values()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            return QMessageBox.warning(self, "Visual Death Studio", "Der Name muss ein gültiger Bezeichner sein (Buchstaben, Ziffern, Unterstrich).")
+        folder = self.explorer._target_dir()
+        path = folder / f"{name}{FORM_SUFFIX}"
+        model = codegen.new_form(name, target)
+        if path.exists() or designer_targets.user_file(path, model).exists():
             return QMessageBox.warning(self, "Visual Death Studio", f"'{name}' existiert bereits.")
-        codegen.write_files(path, codegen.new_form(name))
+        codegen.write_files(path, model)
         self.docs.open(path)
 
     def _add_control(self, ctype):
@@ -944,14 +974,25 @@ class MainWindow(QMainWindow):
             d.view.add_control(ctype)
 
     def _open_handler(self, doc, cid):
-        from .designer.controls import BY_TYPE
         c = doc.view.canvas.control(cid)
-        ev = BY_TYPE[c["type"]].event
+        model = doc.view.model
+        h = designer_targets.handler(model, c)
         doc.save()
-        if not ev:
-            return self.statusBar().showMessage(f"{c['type']} hat kein Standardereignis.", 3000)
-        user = codegen.write_files(doc.path, doc.view.model)
-        line = codegen.add_handler(user, f"{cid}_{ev[1]}", ev[2])
+        if designer_targets.target_of(model) == designer_targets.DEFAULT:
+            from .designer.controls import BY_TYPE
+            ev = BY_TYPE[c["type"]].event
+            if not ev:
+                return self.statusBar().showMessage(f"{c['type']} hat kein Standardereignis.", 3000)
+            user = codegen.write_files(doc.path, model)
+            line = codegen.add_handler(user, f"{cid}_{ev[1]}", ev[2])
+        else:
+            if not h:
+                return self.statusBar().showMessage(f"{c['type']} hat in diesem Ziel kein Standardereignis.", 3000)
+            user = designer_targets.user_file(doc.path, model)
+            if designer_targets.target_of(model) in designer_targets.WEB:
+                self.docs.open(user)
+                return self.statusBar().showMessage(f"Ereignis '{h[0]}': in der Komponente als Prop (React: on{h[0][:1].upper() + h[0][1:]}) bzw. Emit (Vue: @{h[0]}) verbinden.", 8000)
+            line = designer_targets.add_handler(user, model, *h)
         d = self.docs.open(user)
         if d:
             d.view.setPlainText(user.read_text(encoding="utf-8")); d.view.document().setModified(False)

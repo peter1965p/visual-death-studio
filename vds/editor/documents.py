@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QMessageBox, QTabWidget
 
-from ..designer import codegen
+from ..designer import codegen, targets
 from ..designer.canvas import FormDesigner
 from .code_editor import CodeEditor
 
@@ -32,8 +32,14 @@ class Document:
         if self.kind == "diff":
             return None
         if self.kind == "form":
-            return self.path.with_name(self.path.name[: -len(FORM_SUFFIX)] + ".py")
+            return targets.user_file(self.path, self.view.model)
         return self.path
+
+    @property
+    def target(self) -> str:
+        return targets.target_of(self.view.model) if self.kind == "form" else ""
+
+    warnings: list = []
 
     def save(self):
         if self.kind == "diff":
@@ -43,6 +49,7 @@ class Document:
             self.view.document().setModified(False)
         else:
             codegen.write_files(self.path, self.view.model)
+            self.warnings = targets.unsupported(self.view.model)
             self.view.mark_clean()
 
 

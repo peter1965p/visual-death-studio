@@ -3,15 +3,15 @@ import json
 import re
 from pathlib import Path
 
-from . import layouts
+from . import layouts, targets
 from .controls import BY_TYPE, COLOR_KEYS, Raw, calls, component_lines, prop_keys, style_for
 from .layouts import CONTAINERS
 
 HEADER = "# Automatisch von Visual Death Studio erzeugt – Änderungen gehen beim nächsten Speichern des Designers verloren.\n"
 
 
-def new_form(name="Form1"):
-    return {"name": name, "title": name, "width": 480, "height": 320, "controls": [], "components": []}
+def new_form(name="Form1", target="python-qt"):
+    return {"name": name, "title": name, "width": 480, "height": 320, "controls": [], "components": [], "target": target}
 
 
 def class_name(stem: str) -> str:
@@ -177,6 +177,8 @@ def write_files(form_path: Path, model: dict) -> Path:
     stem = form_path.name[: -len(".form.json")]
     cls = class_name(stem)
     form_path.write_text(json.dumps(model, indent=2, ensure_ascii=False), encoding="utf-8")
+    if targets.target_of(model) != targets.DEFAULT:                 # Java Swing, React, Vue
+        return targets.write(form_path, model)
     (form_path.parent / f"{stem}_designer.py").write_text(designer_source(model, cls), encoding="utf-8")
     user = form_path.parent / f"{stem}.py"
     if not user.exists():

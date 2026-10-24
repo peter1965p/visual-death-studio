@@ -190,6 +190,9 @@ class PropertiesDock(QWidget):
             self._section("Design")
             self._row("(Name)", self._edit("str", m["name"], lambda v: None, readonly=True))
             self._row("Text", self._edit("str", m["title"], lambda v: cv.set_prop(None, "title", v)))
+            from ..designer import targets
+            ids = {label: tid for tid, label in targets.LABELS.items()}
+            self._row("Ziel", self._edit("choice", targets.LABELS[targets.target_of(m)], lambda v: cv.set_prop(None, "target", ids.get(v, targets.DEFAULT)), list(ids)))
             self._row("Font", self._edit("font", m.get("font", ""), lambda v: cv.set_prop(None, "font", v)))
             self._row("BackColor", self._edit("color", m.get("back_color", ""), lambda v: cv.set_prop(None, "back_color", v)))
             self._section("Layout")

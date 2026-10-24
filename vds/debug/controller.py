@@ -41,6 +41,8 @@ class DebugController(QObject):
             return
         w = self.w
         doc = w.docs.current_doc()
+        if w.run_web(doc):                                  # Web-Formulare: Dev-Server statt Debugger
+            return
         file = w.project.startup_path(w.root) or (doc.run_target if doc else None)
         if file is None:
             return w.statusBar().showMessage("Keine Datei zum Debuggen – öffne eine Datei oder lege eine Startdatei fest.", 5000)

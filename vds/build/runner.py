@@ -1,5 +1,7 @@
 """Build/Run über QProcess: Compiler- und Programmausgabe landen live im Ausgabefenster."""
+import os
 import shutil
+import signal
 import sys
 from pathlib import Path
 
@@ -20,6 +22,7 @@ class Runner(QObject):
         self.proc: QProcess | None = None
         self._steps: list = []
         self._collected = ""
+        self._group = False
         self.project = ProjectSettings()          # vom Hauptfenster gesetzt
         self.root = Path(".")
 
@@ -35,10 +38,12 @@ class Runner(QObject):
         self._collected = ""
         self._next(0)
 
-    def start_steps(self, steps: list):
-        """Mehrere Schritte [(Befehl, Arbeitsordner)] nacheinander; bei einem Fehler wird abgebrochen."""
+    def start_steps(self, steps: list, group: bool = False):
+        """Mehrere Schritte [(Befehl, Arbeitsordner)] nacheinander; bei einem Fehler wird abgebrochen.
+        group=True: jeder Schritt läuft in eigener Prozessgruppe, damit Stopp auch Kindprozesse (z. B. Dev-Server hinter npm) beendet."""
         if self.busy or not steps:
             return
+        self._group = group
         self._steps = [(list(c), Path(w)) for c, w in steps]
         self._collected = ""
         self._next(0)
@@ -147,7 +152,12 @@ class Runner(QObject):
         p.finished.connect(lambda c, st: self._finished_step(c if st == QProcess.NormalExit else 1))
         self.proc = p
         self.busyChanged.emit(True)
+        if self._group and shutil.which("setsid"):
+            cmd = ["setsid"] + cmd
+        else:
+            self._group_pid = None
         p.start(cmd[0], cmd[1:])
+        self._group_pid = p.processId() if cmd[0] == "setsid" else None
 
     def _read(self, p, kind):
         data = bytes(p.readAllStandardOutput() if kind == "stdout" else p.readAllStandardError()).decode("utf-8", "replace")
@@ -171,4 +181,10 @@ class Runner(QObject):
     def stop(self):
         if self.proc:
             self._steps.clear()
+            pid = getattr(self, "_group_pid", None)
+            if pid:
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
             self.proc.kill()
