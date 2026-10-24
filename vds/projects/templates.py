@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..designer import codegen
 from .maui_gtk import maui_gtk_files
+from .web_templates import DEV, NEXT_FILES, NUXT_FILES, PHP_CONSOLE, PHP_WEB, REACT_FILES, VUE_FILES
 
 GITIGNORE = {
     "python": ".venv/\n__pycache__/\n*.pyc\n.env\n.vds/\n",
@@ -29,6 +30,9 @@ class Template:
     options: tuple = ("git", "readme")   # git | readme | venv
     qt_form: bool = False
     tags: tuple = ()
+    form_target: str = ""        # Designer-Ziel des Start-Formulars (java-swing | react | vue); leer = keins
+    form_dir: str = ""           # Ordner des Formulars relativ zum Projekt (z. B. src, components)
+    settings: dict = field(default_factory=dict)   # Vorbelegung für .vds/project.json (z. B. run_cmd)
 
 
 PY_CONSOLE = 'def main() -> None:\n    print("Hallo, __NAME__!")\n\n\nif __name__ == "__main__":\n    main()\n'
@@ -108,6 +112,26 @@ TEMPLATES = [
     Template("py-qt", "Python-Fensteranwendung (Qt, mit Formular-Designer)",
              "Eine PySide6-Anwendung mit visuellem Formular (Form1) – Controls per Drag & Drop platzieren.",
              "Python", "python", "Desktop", {"requirements.txt": "PySide6\n"}, "Form1.form.json", ("git", "readme", "venv"), qt_form=True),
+    Template("react-vite", "React + TypeScript (Vite, mit Designer)",
+             "React-App mit Vite und TypeScript; die Seite Form1 baust du im Designer (Ausgabe als .tsx-Komponente). Start: F5 (npm install + npm run dev).",
+             "TypeScript", "typescript", "Web", REACT_FILES, "src/Form1.form.json", ("git", "readme"), form_target="react", form_dir="src", settings={"run_cmd": DEV}),
+    Template("vue-vite", "Vue 3 + TypeScript (Vite, mit Designer)",
+             "Vue-3-App mit Vite und TypeScript; Form1 entsteht im Designer als .vue-Komponente. Start: F5 (npm install + npm run dev).",
+             "TypeScript", "vue", "Web", VUE_FILES, "src/Form1.form.json", ("git", "readme"), form_target="vue", form_dir="src", settings={"run_cmd": DEV}),
+    Template("next", "Next.js (App Router, TypeScript, mit Designer)",
+             "Next.js-App mit App Router; Form1 (Designer) liegt in components/ und wird auf der Startseite eingebunden. Start: F5.",
+             "TypeScript", "typescript", "Web", NEXT_FILES, "components/Form1.form.json", ("git", "readme"), form_target="react", form_dir="components",
+             settings={"run_cmd": DEV}),
+    Template("nuxt", "Nuxt 3 (Vue, TypeScript, mit Designer)",
+             "Nuxt-3-App; Form1 (Designer) liegt in components/ und wird automatisch importiert. Start: F5.",
+             "TypeScript", "vue", "Web", NUXT_FILES, "components/Form1.form.json", ("git", "readme"), form_target="vue", form_dir="components", settings={"run_cmd": DEV}),
+    Template("java-swing", "Java-Fensteranwendung (Swing, mit Designer)",
+             "Swing-Fenster mit visuellem Formular (Form1): Controls und Layouts im Designer, Ereignisse als überschreibbare Methoden. Start: F5 (java Form1.java).",
+             "Java", "java", "Desktop", {}, "Form1.form.json", ("git", "readme"), form_target="java-swing"),
+    Template("php-console", "PHP-Skript (Konsole)", "Ein PHP-Skript, das mit dem PHP-Interpreter läuft.", "PHP", "php", "Konsole",
+             {"main.php": PHP_CONSOLE}, "main.php"),
+    Template("php-web", "PHP-Webanwendung (eingebauter Server)", "Kleine PHP-Seite mit Formular; Start über den eingebauten PHP-Server (F5, Adresse http://127.0.0.1:8000).",
+             "PHP", "php", "Web", PHP_WEB, "public/index.php", ("git", "readme"), settings={"run_cmd": "php -S 127.0.0.1:8000 -t public"}),
     Template("py-fastapi", "Python-Web-API (FastAPI)", "Eine kleine REST-API mit FastAPI und Uvicorn.",
              "Python", "python", "Web", {"main.py": FASTAPI, "requirements.txt": "fastapi\nuvicorn[standard]\n"}, "main.py", ("git", "readme", "venv")),
     Template("c-console", "C-Konsolenanwendung", "Ein C-Programm mit main().", "C", "c", "Konsole",
@@ -143,7 +167,13 @@ BY_ID = {t.id: t for t in TEMPLATES}
 
 
 def _ignore_for(t: Template) -> str:
-    return GITIGNORE["python"] if t.lang_id == "python" else GITIGNORE["node"] if t.lang_id == "javascript" else GITIGNORE["default"]
+    if t.lang_id == "python":
+        return GITIGNORE["python"]
+    if t.lang_id in ("javascript", "typescript", "vue"):
+        return GITIGNORE["node"] + "dist/\n.next/\n.nuxt/\n.output/\n*.tsbuildinfo\n"
+    if t.lang_id == "php":
+        return GITIGNORE["default"] + "vendor/\n"
+    return GITIGNORE["default"]
 
 
 def _qt_demo(root: Path):
@@ -159,6 +189,27 @@ def _qt_demo(root: Path):
         "def button1_clicked(self):\n        pass", 'def button1_clicked(self):\n        self.label1.setText("Button geklickt!")'), encoding="utf-8")
 
 
+def _demo_form(root: Path, t: Template, name: str):
+    """Start-Formular (Label + Button) für Java Swing, React und Vue; Java bekommt gleich einen Ereignis-Handler."""
+    from ..designer import targets
+    model = codegen.new_form("Form1", t.form_target)
+    model["title"] = name
+    model["controls"] = [
+        {"type": "Label", "name": "label1", "x": 16, "y": 16, "w": 260, "h": 24, "props": {"text": f"Hallo aus {name}!", "enabled": True, "visible": True, "tooltip": "", "font_size": 12}},
+        {"type": "Button", "name": "button1", "x": 16, "y": 56, "w": 120, "h": 32, "props": {"text": "Klick mich", "enabled": True, "visible": True, "tooltip": "", "font_size": 0}},
+    ]
+    folder = root / t.form_dir
+    folder.mkdir(parents=True, exist_ok=True)
+    user = codegen.write_files(folder / "Form1.form.json", model)
+    if t.form_target == "java-swing":
+        h = targets.handler(model, model["controls"][1])
+        targets.add_handler(user, model, *h)
+        user.write_text(user.read_text(encoding="utf-8").replace(f"protected void {h[0]}() {{\n    }}", f'protected void {h[0]}() {{\n        label1.setText("Button geklickt!");\n    }}'),
+                        encoding="utf-8")
+        return [f"  + {p.name}" for p in (folder / "Form1.form.json", folder / "Form1Base.java", user)]
+    return [f"  + {(folder / n).relative_to(root).as_posix()}" for n in ("Form1.form.json", user.name)]
+
+
 def create_project(t: Template, name: str, location: Path, options: dict):
     """Legt <location>/<name> an. Rückgabe: (Projektordner, zu öffnende Datei|None, Protokollzeilen)."""
     root = location / name
@@ -168,7 +219,8 @@ def create_project(t: Template, name: str, location: Path, options: dict):
     log = [f"Projekt '{name}' ({t.name}) wird in {root} erstellt…"]
     ident = re.sub(r"\W", "_", name)
     ident = ident if not ident[0].isdigit() else "_" + ident
-    fill = lambda x: x.replace("__NAME__", name).replace("__IDLOWER__", ident.lower()).replace("__ID__", ident)
+    npm_name = re.sub(r"[^a-z0-9._-]", "-", name.lower()).strip("-.") or "app"
+    fill = lambda x: x.replace("__NAME__", name).replace("__IDLOWER__", npm_name if t.lang_id in ("typescript", "vue", "javascript") else ident.lower()).replace("__ID__", ident)
     files = t.files(options) if callable(t.files) else t.files
     for rel, content in files.items():
         f = root / fill(rel)
@@ -181,6 +233,12 @@ def create_project(t: Template, name: str, location: Path, options: dict):
             text = (root / rel).read_text(encoding="utf-8")
             (root / rel).write_text(text.replace("__NAME__", name), encoding="utf-8")
         log += ["  + Form1.form.json", "  + Form1_designer.py", "  + Form1.py"]
+    if t.form_target:
+        log += _demo_form(root, t, name)
+    if t.settings:
+        from ..project import ProjectSettings
+        ProjectSettings(**t.settings).save(root)
+        log.append("  + .vds/project.json (Start-Befehl)")
     if options.get("readme"):
         (root / "README.md").write_text(f"# {name}\n\n{t.description}\n", encoding="utf-8")
         log.append("  + README.md")

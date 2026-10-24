@@ -72,6 +72,14 @@ LANGS = [
         "main": "public class Main {\n    public static void main(String[] args) {\n    }\n}\n", "class": "public class Name {\n}\n",
         "for-each": "for (var x : items) {\n}\n", "try-with-resources": "try (var r = new java.io.FileReader(\"datei.txt\")) {\n} catch (Exception e) {\n}\n",
         "interface": "public interface Name {\n    void tu();\n}\n", "record": "public record Name(int feld) {}\n", "Stream": "var r = items.stream().filter(x -> x > 0).toList();\n"}),
+    Lang("php", "PHP", (".php",), ["php", "{file}"], snippets={
+        "PHP-Kopf": "<?php\n\ndeclare(strict_types=1);\n", "function": "function name(int $a): int\n{\n    return $a;\n}\n",
+        "class": "class Name\n{\n    public function __construct(private string $feld = '')\n    {\n    }\n}\n",
+        "foreach": "foreach ($items as $key => $item) {\n}\n", "try / catch": "try {\n} catch (Throwable $e) {\n    echo $e->getMessage();\n}\n",
+        "Array-Funktionen": "$result = array_map(fn($x) => $x * 2, array_filter($items, fn($x) => $x > 0));\n",
+        "PDO-Verbindung": "$pdo = new PDO('sqlite:daten.db');\n$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);\n",
+        "Formular lesen": "$name = trim($_POST['name'] ?? '');\n", "JSON-Antwort": "header('Content-Type: application/json');\necho json_encode(['ok' => true]);\n",
+        "match": "$text = match ($x) {\n    1 => 'eins',\n    default => 'andere',\n};\n", "namespace + use": "namespace App;\n\nuse DateTimeImmutable;\n"}),
     Lang("shell", "Bash", (".sh", ".bash"), ["bash", "{file}"], lsp=["bash-language-server", "start"], lsp_id="shellscript", comment="#", snippets={
         "Skript-Kopf": "#!/usr/bin/env bash\nset -euo pipefail\n", "Funktion": "name() {\n    echo \"$1\"\n}\n", "if": "if [[ -f datei ]]; then\n    echo ja\nfi\n",
         "for": "for f in *.txt; do\n    echo \"$f\"\ndone\n", "while read": "while IFS= read -r line; do\n    echo \"$line\"\ndone < datei.txt\n",
@@ -93,6 +101,7 @@ def available(cmd: list | None) -> bool:
 _GCC = re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+):(?:(?P<col>\d+):)?\s*(?P<sev>fatal error|error|warning|note)?:?\s*(?P<msg>.+)$")
 _RUST = re.compile(r"^\s*--> (?P<file>.+):(?P<line>\d+):(?P<col>\d+)$")
 _PY = re.compile(r'^\s*File "(?P<file>.+)", line (?P<line>\d+)')
+_PHP = re.compile(r"^(?:PHP )?(?P<sev>Parse error|Fatal error|Warning|Notice|Deprecated):\s+(?P<msg>.+?) in (?P<file>\S.*?) on line (?P<line>\d+)\s*$")
 
 
 def parse_problems(text: str):
@@ -103,6 +112,10 @@ def parse_problems(text: str):
         m = _PY.match(ln)
         if m:
             py_loc = (m["file"], int(m["line"]))
+            continue
+        m = _PHP.match(ln)
+        if m:
+            out.append(("warning" if m["sev"] in ("Warning", "Notice", "Deprecated") else "error", m["msg"], m["file"], int(m["line"]), 1))
             continue
         m = _RUST.match(ln)
         if m and pending:

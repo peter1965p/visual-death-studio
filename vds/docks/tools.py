@@ -3,6 +3,7 @@ import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QLineEdit, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from ..build.languages import BY_ID, LANGS, lang_for
@@ -73,6 +74,14 @@ class Toolbox(QWidget):
         self.rebuild()
 
     # --- Aufbau ---------------------------------------------------------------------------------------------------
+    target = ""                                   # Designer-Ziel des aktiven Formulars (leer = keins)
+
+    def set_target(self, target: str):
+        """Controls, die das Ziel des aktiven Formulars nicht erzeugt (z. B. Dial für React), werden abgeblendet."""
+        if target != self.target:
+            self.target = target
+            self.rebuild()
+
     def set_language(self, lang_id: str | None):
         if lang_id != self.lang_id:
             self.lang_id = lang_id
@@ -121,6 +130,11 @@ class Toolbox(QWidget):
         it.setIcon(0, control_icon(spec.type))
         it.setData(0, CTRL_ROLE, spec.type)
         it.setToolTip(0, f"{spec.type} ({spec.qt.__name__}) – auf das Formular ziehen oder doppelklicken")
+        if self.target:
+            from ..designer import targets
+            if not targets.supports({"target": self.target}, spec.type):
+                it.setForeground(0, QBrush(QColor("#4d5b82")))
+                it.setToolTip(0, f"{spec.type}: für {targets.LABELS[self.target]} nicht verfügbar – wird beim Erzeugen übersprungen")
 
     @staticmethod
     def _snippet(parent, label, text):

@@ -16,7 +16,7 @@ from ..docks.explorer import LANG_COLOR
 from .templates import TEMPLATES, Template, create_project
 
 COLORS = {**LANG_COLOR, "claude": "#d97757"}
-ABBR = {"claude": "✦", "python": "Py", "c": "C", "cpp": "C++", "csharp": "C#", "rust": "Rs", "go": "Go", "javascript": "JS", "java": "Jv", "shell": "sh", "": "＋"}
+ABBR = {"claude": "✦", "typescript": "TS", "vue": "Vu", "php": "PHP", "python": "Py", "c": "C", "cpp": "C++", "csharp": "C#", "rust": "Rs", "go": "Go", "javascript": "JS", "java": "Jv", "shell": "sh", "": "＋"}
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 OPTION_LABELS = {"essentials": "Linux-Essentials einbinden (Zwischenablage, Geräteinfo, Einstellungen …)", "git": "Git-Repository initialisieren (inkl. .gitignore)", "readme": "README.md erstellen",
                  "venv": "Virtuelle Python-Umgebung (.venv) anlegen"}

@@ -41,7 +41,7 @@ class DebugController(QObject):
             return
         w = self.w
         doc = w.docs.current_doc()
-        if w.run_web(doc):                                  # Web-Formulare: Dev-Server statt Debugger
+        if w.run_project_command("buildrun") or w.run_web(doc):      # Start-Befehl / Web-Formulare: Dev-Server statt Debugger
             return
         file = w.project.startup_path(w.root) or (doc.run_target if doc else None)
         if file is None:

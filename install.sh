@@ -118,6 +118,7 @@ hint dlv "Debugger für Go" delve
 hint rustc "Rust" rust
 hint dotnet "C#" dotnet-sdk
 hint java "Java" jdk-openjdk
+hint php "PHP" php
 hint claude "Claude-Chat und -Vervollständigung (Claude Code CLI)" "-"
 echo "  Alles Weitere zeigt das Programm unter Hilfe → Installierte Werkzeuge prüfen."
 

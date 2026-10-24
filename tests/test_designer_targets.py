@@ -347,3 +347,19 @@ def test_web_form_without_package_json_explains(qapp, tmp_path, monkeypatch):
         assert "package.json" in w.output.text.toPlainText() and not w.runner.busy
     finally:
         w.docs.close_all(); w.close()
+
+
+def test_toolbox_dims_controls_the_target_cannot_generate(qapp):
+    from PySide6.QtWidgets import QApplication
+    from vds.docks.tools import CTRL_ROLE, Toolbox
+    tb = Toolbox()
+
+    def find(t):
+        az = next(tb.tree.topLevelItem(i) for i in range(tb.tree.topLevelItemCount()) if tb.tree.topLevelItem(i).text(0).startswith("Alle"))
+        return next(az.child(i) for i in range(az.childCount()) if az.child(i).data(0, CTRL_ROLE) == t)
+    assert "nicht verfügbar" not in find("FontDialog").toolTip(0)
+    tb.set_target("react")
+    assert "nicht verfügbar" in find("FontDialog").toolTip(0) and "React" in find("FontDialog").toolTip(0) and "nicht verfügbar" not in find("Button").toolTip(0)
+    tb.set_target("python-qt")
+    assert "nicht verfügbar" not in find("FontDialog").toolTip(0)
+    tb.set_target("")

@@ -611,6 +611,7 @@ class MainWindow(QMainWindow):
         lang = lang_for(target) if target else None
         if target:
             self.toolbox.set_language(lang.id if lang else None)      # Codeausschnitte passend zur Sprache der aktuellen Datei
+        self.toolbox.set_target(doc.target if form else "")
         self.st_lang.setText("Formular-Designer" if form else "Vergleich" if doc and doc.kind == "diff" else (lang.name if lang else "Nur Text"))
         self._start_text = f" {target.name}" if target else " Starten"
         self._refresh_run_state()
@@ -649,9 +650,23 @@ class MainWindow(QMainWindow):
         self.runner.start_steps(steps, group=True)
         return True
 
+    def run_project_command(self, mode) -> bool:
+        """Start-Befehl aus den Projekteigenschaften (z. B. Dev-Server); gilt für F5 und Strg+F5."""
+        cmd = self.project.run_cmd.strip()
+        if not cmd or mode == "build":
+            return False
+        if self.runner.busy:
+            return True
+        self.docs.save_all()
+        self.d_output.show(); self.d_output.raise_(); self.output.clear(); self.errors.set_source("build", [])
+        self.output.append(f"Start-Befehl: {cmd}  (Stopp: Umschalt+F5)\n", "info")
+        self._build_base = self.root
+        self.runner.start_steps([(["bash", "-c", cmd], self.root)], group=True)
+        return True
+
     def run(self, mode, debug=False, _retry=False):
         doc = self.docs.current_doc()
-        if self.run_web(doc):
+        if self.run_project_command(mode) or self.run_web(doc):
             return
         if not doc or doc.run_target is None or self.runner.busy:
             return

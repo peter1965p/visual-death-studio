@@ -51,6 +51,7 @@ class ProjectPropertiesDialog(QDialog):
         self.python = QLineEdit(s.python); self.python.setPlaceholderText("leer = .venv des Projekts bzw. System-Python")
         self.env = QPlainTextEdit("\n".join(f"{k}={v}" for k, v in s.env.items())); self.env.setPlaceholderText("NAME=Wert (eine Variable pro Zeile)")
         self.env.setFixedHeight(90)
+        self.run = QLineEdit(s.run_cmd); self.run.setPlaceholderText("leer = aktive Datei starten (z. B. npm run dev, php -S 127.0.0.1:8000 -t public)")
         self.build = QLineEdit(s.build_cmd); self.build.setPlaceholderText(self._auto_hint())
         self.clean = QLineEdit(s.clean_cmd); self.clean.setPlaceholderText("leer = automatisch bzw. Build-Ordner löschen")
         form = QFormLayout()
@@ -59,6 +60,7 @@ class ProjectPropertiesDialog(QDialog):
         form.addRow("Arbeitsordner", self._with_browse(self.cwd, "Arbeitsordner wählen", True))
         form.addRow("Python-Interpreter", self._with_browse(self.python, "Interpreter wählen", False))
         form.addRow("Umgebungsvariablen", self.env)
+        form.addRow("Start-Befehl", self.run)
         form.addRow("Build-Befehl", self.build)
         form.addRow("Clean-Befehl", self.clean)
         note = QLabel("Der Build-Befehl läuft in einer Shell im Projektordner (&& und Variablen sind möglich). Ohne Eintrag erkennt Visual Death Studio "
@@ -87,7 +89,7 @@ class ProjectPropertiesDialog(QDialog):
                 env[k.strip()] = v.strip()
         return ProjectSettings(startup=self.startup.currentText().strip(), args=self.args.text().strip(), cwd=self.cwd.text().strip(), env=env,
                                python=self.python.text().strip(), build_cmd=self.build.text().strip(), clean_cmd=self.clean.text().strip(),
-                               test_cmd=base.test_cmd)
+                               test_cmd=base.test_cmd, run_cmd=self.run.text().strip())
 
 
 class ShortcutsDialog(QDialog):
@@ -136,7 +138,7 @@ TOOLS = [
     ("rustc", "Rust kompilieren", "sudo pacman -S rust"), ("cargo", "Rust-Projekte", "sudo pacman -S rust"),
     ("dotnet", "C# bauen und ausführen", dbg_tools.HINTS["dotnet"]), ("netcoredbg", "Debugger für C#", dbg_tools.HINTS["netcoredbg"]),
     ("javac", "Java kompilieren", dbg_tools.HINTS["javac"]), ("java", "Java ausführen", dbg_tools.HINTS["javac"]), ("jdb", "Debugger für Java", dbg_tools.HINTS["jdb"]),
-    ("mvn", "Maven-Projekte", "sudo pacman -S maven"), ("gradle", "Gradle-Projekte", "sudo pacman -S gradle"),
+    ("php", "PHP ausführen und Webserver (php -S)", "sudo pacman -S php"), ("mvn", "Maven-Projekte", "sudo pacman -S maven"), ("gradle", "Gradle-Projekte", "sudo pacman -S gradle"),
     ("git", "Versionsverwaltung, Änderungen-Ansicht", "sudo pacman -S git"), ("claude", "Claude-Chat und -Vervollständigung", "siehe claude.com/claude-code"),
 ]
 

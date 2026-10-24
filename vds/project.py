@@ -15,6 +15,7 @@ class ProjectSettings:
     build_cmd: str = ""               # eigener Build-Befehl (leer = automatische Erkennung)
     clean_cmd: str = ""
     test_cmd: str = ""
+    run_cmd: str = ""                 # eigener Startbefehl (z. B. Dev-Server): ersetzt F5/Strg+F5 für das ganze Projekt
 
     @staticmethod
     def path(root: Path) -> Path:
