@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout,
                                QWidget)
 
-from ..ai import claude_cli
+from ..ai import backend
 from ..ai.prompts import SYSTEM_CHAT
 
 
@@ -30,10 +30,8 @@ class ChatPanel(QWidget):
         self.session: str | None = None
         self.active_file = lambda: (None, "")        # -> (Pfad|None, Auswahltext)
         self.md = ""
-        self.claude = claude_cli.ClaudeProcess(self)
-        self.claude.text.connect(lambda t: self._add(t.strip()))
-        self.claude.tool.connect(lambda t: self._add(f"*⚙ {t}*"))
-        self.claude.finished.connect(self._finished)
+        self.claude = None
+        self._attach_agent()
 
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(False)
@@ -46,7 +44,7 @@ class ChatPanel(QWidget):
         self.bash.setToolTip("Erlaubt Claude, Shell-Befehle in deinem Projekt auszuführen (z. B. Tests, pip install). "
                              "Standardmäßig hat Claude nur Dateiwerkzeuge.")
         self.send_btn = QPushButton("Senden"); self.send_btn.clicked.connect(self.send)
-        self.stop_btn = QPushButton("Stopp"); self.stop_btn.clicked.connect(self.claude.stop); self.stop_btn.hide()
+        self.stop_btn = QPushButton("Stopp"); self.stop_btn.clicked.connect(lambda: self.claude.stop()); self.stop_btn.hide()
         new_btn = QPushButton("Neue Unterhaltung"); new_btn.clicked.connect(self.reset)
         self.status = QLabel(); self.status.setObjectName("sub")
         opts = QHBoxLayout(); opts.addWidget(self.ctx); opts.addWidget(self.bash); opts.addStretch()
@@ -58,6 +56,25 @@ class ChatPanel(QWidget):
         self.reset()
 
     # --- Zustand ---------------------------------------------------------------------------
+    def _attach_agent(self):
+        """Agent des gewählten Anbieters (Claude-CLI oder API) anlegen und verdrahten."""
+        self.claude = backend.make_agent(self)
+        self.claude.text.connect(lambda t: self._add(t.strip()))
+        self.claude.tool.connect(lambda t: self._add(f"*⚙ {t}*"))
+        self.claude.finished.connect(self._finished)
+        self._provider = backend.provider()
+        self._available = backend.available()
+
+    def refresh_backend(self):
+        """Nach einer Änderung der Optionen: bei Anbieterwechsel neuen Agenten nehmen (nie während eines Laufs)."""
+        if self.claude.running:
+            return
+        changed = backend.provider() != self._provider
+        if changed:
+            self._attach_agent()
+        if changed or backend.available() != self._available:
+            self.reset()
+
     def set_root(self, root: Path):
         self.root = Path(root)
         self.reset()
@@ -67,10 +84,11 @@ class ChatPanel(QWidget):
             return
         self.session = None
         self.md = ""
-        if not claude_cli.available():
-            self._add("**Claude-CLI nicht gefunden.** Installiere Claude Code und melde dich an, damit der Chat funktioniert.")
+        if not backend.available():
+            self._add(backend.unavailable_message())
         else:
-            self._add("Hallo! Ich kann in diesem Projekt Code schreiben, ändern und erklären. Was möchtest du tun?")
+            self._add("Hallo! Ich kann in diesem Projekt Code schreiben, ändern und erklären. Was möchtest du tun?"
+                      + (f"\n\n*Verbunden über {backend.label()}.*" if backend.provider() == "api" else ""))
 
     def _add(self, md: str):
         self.md += md + "\n\n"
@@ -80,7 +98,7 @@ class ChatPanel(QWidget):
     # --- Senden ------------------------------------------------------------------------------
     def send(self):
         text = self.input.toPlainText().strip()
-        if not text or self.claude.running or not claude_cli.available():
+        if not text or self.claude.running or not backend.available():
             return
         self.input.clear()
         self._add("> **Du:** " + text.replace("\n", "\n> "))

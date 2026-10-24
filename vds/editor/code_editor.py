@@ -1,7 +1,7 @@
 """Code-Editor: Zeilennummern, Haltepunkt-Gutter, aktuelle Zeile, Diagnosen, Auto-Einrückung."""
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtCore import QPoint, QPointF, QTimer
-from PySide6.QtGui import QTextCursor, QColor, QFont, QPainter, QPen, QPolygonF, QTextCharFormat, QTextFormat
+from PySide6.QtGui import QTextCursor, QColor, QFont, QPainter, QPen, QPolygonF, QTextCharFormat, QTextFormat, QTextOption
 from PySide6.QtWidgets import QInputDialog, QMenu, QPlainTextEdit, QTextEdit, QToolTip, QWidget
 
 import html
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..build.languages import lang_for
 from ..lsp.ranking import KIND_NAME, rank
+from .. import options
 from ..theme import EDITOR_FONT
 from ..ai.completion import build_prompt
 from .completion import CompletionPopup, SignatureTip, SuggestionCard
@@ -59,9 +60,7 @@ class CodeEditor(QPlainTextEdit):
             f.setFamilies([s.strip() for s in EDITOR_FONT.split(",")])
             f.setPointSize(11)
             f.setStyleHint(QFont.Monospace)
-        self.setFont(f)
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
-        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.set_editor_font(f)
         self.breakpoints: set[int] = set()
         self.bp_conditions: dict[int, str] = {}
         self.bp_disabled: set[int] = set()
@@ -96,13 +95,37 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self._scroll_gutter)
         self.cursorPositionChanged.connect(self._on_cursor)
         self.setViewportMargins(self.gutter_width(), 0, 0, 0)
+        self.apply_options()
         self._on_cursor()
+
+    def set_editor_font(self, f: QFont):
+        """Schrift per eigenem Stylesheet setzen: Das globale Stylesheet (`* { font-family … }`) überschreibt sonst jedes setFont() und der Editor wäre proportional."""
+        fams = [x for x in (f.families() or [f.family()]) if x]
+        size = f.pointSize() if f.pointSize() > 0 else 11
+        css = (f'QPlainTextEdit {{ font-family: {", ".join(chr(34) + x + chr(34) for x in fams)}, monospace; font-size: {size}pt; '
+               f'font-weight: {f.weight()}; font-style: {"italic" if f.italic() else "normal"}; }}')
+        self.setFont(f)
+        self.setStyleSheet(css)
+        self.ensurePolished()                                   # damit fontMetrics() sofort die wirksame Schrift misst
+
+    def indent_unit(self) -> str:
+        return " " * options.get("editor/tab_width") if options.get("editor/use_spaces") else "\t"
+
+    def apply_options(self):
+        """Tab-Breite, Zeilenumbruch, Leerraum-Anzeige und IntelliSense-Verzögerung aus Extras → Optionen übernehmen."""
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * options.get("editor/tab_width"))
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth if options.get("editor/word_wrap") else QPlainTextEdit.NoWrap)
+        opt = self.document().defaultTextOption()
+        flags = opt.flags()
+        opt.setFlags(flags | QTextOption.ShowTabsAndSpaces if options.get("editor/whitespace") else flags & ~QTextOption.ShowTabsAndSpaces)
+        self.document().setDefaultTextOption(opt)
+        self._ctimer.setInterval(options.get("intellisense/delay_ms"))
 
     def refresh_font(self, f: QFont):
         """Neue Schrift übernehmen: Tabbreite und Zeilennummern-Spalte neu berechnen."""
-        self.setFont(f)
+        self.set_editor_font(f)
         self.popup.list.setFont(f); self.sigtip.setFont(f)
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
+        self.apply_options()
         self.setViewportMargins(self.gutter_width(), 0, 0, 0)
         cr = self.contentsRect()
         self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
@@ -295,12 +318,12 @@ class CodeEditor(QPlainTextEdit):
 
     def _basic_key(self, e):
         if e.key() == Qt.Key_Tab and not e.modifiers():
-            self.insertPlainText("    ")
+            self.insertPlainText(self.indent_unit())
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter) and not e.modifiers():
             text = self.textCursor().block().text()
             indent = text[: len(text) - len(text.lstrip())]
             if text.rstrip().endswith((":", "{", "(", "[")):
-                indent += "    "
+                indent += self.indent_unit()
             super().keyPressEvent(e)
             self.insertPlainText(indent)
         else:
@@ -348,8 +371,10 @@ class CodeEditor(QPlainTextEdit):
             if word_char:
                 return self._refilter()
             self.popup.hide()
+        if not options.get("intellisense/auto"):
+            return                                            # nur manuell (Strg+Leertaste)
         prefix, _ = self._prefix()
-        if word_char and len(prefix) >= 2 and not prefix[0].isdigit() and not self._in_string_or_comment():
+        if word_char and len(prefix) >= options.get("intellisense/min_chars") and not prefix[0].isdigit() and not self._in_string_or_comment():
             self._after_trigger = False
             self._ctimer.start()
         elif ch == "." or (ch == ":" and prev == ":") or (ch == ">" and prev == "-"):

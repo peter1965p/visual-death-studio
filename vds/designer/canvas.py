@@ -18,6 +18,7 @@ CURSORS = [Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorC
            Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorCursor]
 MIME = "application/x-vds-control"
 GUIDE = QColor("#e040a0")
+SNAP_ON, SHOW_GRID = True, True               # Fanglinien und Punktraster (Extras → Optionen → Designer)
 TRAY_H, CHIP_W = 36, 156                       # Komponentenleiste unter dem Formular
 
 LIGHT = """
@@ -34,12 +35,22 @@ LIGHT = """
 """
 
 
+def configure(grid: int | None = None, snap: bool | None = None, show_grid: bool | None = None):
+    """Raster, Fanglinien und Rasteranzeige setzen (gilt für alle Designer)."""
+    global GRID, SNAP_ON, SHOW_GRID
+    GRID = grid if grid else GRID
+    SNAP_ON = SNAP_ON if snap is None else snap
+    SHOW_GRID = SHOW_GRID if show_grid is None else show_grid
+
+
 class Surface(QWidget):
     bg = QColor("#f0f0f0")
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.fillRect(self.rect(), self.bg)
+        if not SHOW_GRID:
+            return
         p.setPen(self.bg.lighter(145) if self.bg.lightness() < 110 else self.bg.darker(122))
         for x in range(0, self.width(), GRID):
             for y in range(0, self.height(), GRID):
@@ -514,7 +525,7 @@ class Canvas(QWidget):
         out = []
         for start, size, delta, targets, kind, off in ((bx, bw, dx, xs, "v", org.x()), (by, bh, dy, ys, "h", org.y())):
             pos = start + delta
-            cands = [] if in_layout else [(t - m, t) for m in (pos, pos + size // 2, pos + size) for t in targets if abs(t - m) <= SNAP]
+            cands = [] if in_layout or not SNAP_ON else [(t - m, t) for m in (pos, pos + size // 2, pos + size) for t in targets if abs(t - m) <= SNAP]
             if cands:
                 adj, line = min(cands, key=lambda a: abs(a[0]))
                 pos += adj; self.guides.append((kind, line + off))

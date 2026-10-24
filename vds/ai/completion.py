@@ -6,7 +6,8 @@ from PySide6.QtCore import QObject, QProcess, QSettings, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from ..branding import SETTINGS_APP, SETTINGS_ORG
-from . import claude_cli
+from . import api, backend, claude_cli
+import threading
 
 MODELS = {"haiku": "Haiku – schnell und günstig (Standard)", "sonnet": "Sonnet – ausgewogen", "opus": "Opus – am gründlichsten"}
 MAX_BEFORE, MAX_AFTER = 6000, 2000
@@ -50,9 +51,12 @@ def clean_output(text: str) -> str:
 class AiCompletion(QObject):
     """Verwaltet Modell-Einstellung, Einwilligung und den laufenden Aufruf (höchstens einer gleichzeitig)."""
     busyChanged = Signal(bool)
+    _api_done = Signal(object, bool, str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._api_token = None
+        self._api_done.connect(self._api_finished)
         self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self.root = Path(".")
         self.proc: QProcess | None = None
@@ -69,25 +73,29 @@ class AiCompletion(QObject):
 
     @property
     def busy(self) -> bool:
-        return self.proc is not None
+        return self.proc is not None or self._api_token is not None
 
     def consent(self, parent) -> bool:
-        if self.settings.value("ai/ack") in (True, "true", "1", 1):
+        key = "ai/ack_api" if backend.provider() == "api" else "ai/ack"
+        if self.settings.value(key) in (True, "true", "1", 1):
             return True
+        how = ("mit deinem API-Schlüssel (Abrechnung pro Token über dein Anthropic-Konto)" if backend.provider() == "api"
+               else "über deine Claude-Code-Anmeldung (zählt wie normale Claude-Nutzung)")
         ok = QMessageBox.question(parent, "Claude-Vervollständigung",
-                                  "Für den Vorschlag sendet die IDE den Code rund um den Cursor über deine Claude-Code-Anmeldung an Anthropic. "
-                                  "Jeder Aufruf zählt wie normale Claude-Nutzung.\n\nFortfahren?") == QMessageBox.Yes
+                                  f"Für den Vorschlag sendet die IDE den Code rund um den Cursor {how} an Anthropic.\n\nFortfahren?") == QMessageBox.Yes
         if ok:
-            self.settings.setValue("ai/ack", True)
+            self.settings.setValue(key, True)
         return ok
 
     def run(self, prompt: str, cb, parent=None):
         """cb(ok, text_oder_fehler). Ein neuer Aufruf bricht einen laufenden ab."""
-        if not claude_cli.available():
-            return cb(False, "Die Claude-CLI ('claude') wurde nicht gefunden.")
+        if not backend.available():
+            return cb(False, backend.unavailable_message().replace("**", ""))
         if not self.consent(parent):
             return cb(False, "Abgebrochen.")
         self.cancel()
+        if backend.provider() == "api":
+            return self._run_api(prompt, cb)
         p = QProcess(self)
         p.setWorkingDirectory(str(self.root))
         out, err = [], []
@@ -113,7 +121,34 @@ class AiCompletion(QObject):
                            "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SYSTEM])
         p.closeWriteChannel()
 
+    def _run_api(self, prompt: str, cb):
+        """Vorschlag über die Claude-API: Anfrage im Thread, Ergebnis per Signal zurück in den GUI-Thread."""
+        token = self._api_token = object()
+        self._timer.start()
+        self.busyChanged.emit(True)
+        cfg = api.config("completion")
+
+        def work():
+            try:
+                text = clean_output(api.complete_text(cfg, SYSTEM, prompt, timeout=TIMEOUT_MS / 1000))
+                res = (True, text) if text.strip() else (False, "Claude hat nichts geliefert.")
+            except Exception as e:
+                res = (False, api.describe_error(e)[:300])
+            self._api_done.emit(token, res[0], res[1], cb)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _api_finished(self, token, ok, text, cb):
+        if token is not self._api_token:
+            return                                       # abgebrochen/ersetzt
+        self._api_token = None
+        self._timer.stop(); self.busyChanged.emit(False)
+        cb(ok, text)
+
     def cancel(self):
+        if getattr(self, "_api_token", None) is not None:
+            self._api_token = None
+            self._timer.stop()
+            self.busyChanged.emit(False)
         if self.proc:
             p, self.proc = self.proc, None
             self._timer.stop()

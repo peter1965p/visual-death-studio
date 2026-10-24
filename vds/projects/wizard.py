@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                                QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
 
-from ..ai import claude_cli
+from ..ai import backend
 from ..branding import SETTINGS_APP, SETTINGS_ORG
 from ..ai.prompts import LANG_HINTS, SYSTEM_PROJECT, parse_main, project_prompt
 from ..docks.explorer import LANG_COLOR
@@ -87,7 +87,7 @@ class NewProjectDialog(QDialog):
         self.stack.addWidget(self._page_configure(loc))
         self.stack.addWidget(self._page_options())
         self.stack.addWidget(self._page_progress())
-        self.claude = claude_cli.ClaudeProcess(self)
+        self.claude = backend.make_agent(self)
         self.claude.text.connect(lambda t: self.ai_log.appendPlainText("\n".join(l for l in t.strip().splitlines() if not l.startswith("MAIN:")).strip() + "\n"))
         self.claude.tool.connect(lambda t: self.ai_log.appendPlainText("⚙ " + t))
         self.claude.finished.connect(self._ai_finished)
@@ -207,7 +207,7 @@ class NewProjectDialog(QDialog):
     def _check_desc(self):
         if self.stack.currentIndex() == 2:
             need = self._is_ai()
-            self.next.setEnabled(not need or (claude_cli.available() and len(self.desc.toPlainText().strip()) >= 10))
+            self.next.setEnabled(not need or (backend.available() and len(self.desc.toPlainText().strip()) >= 10))
 
     # --- Seite 4: Claude arbeitet -------------------------------------------------------------
     def _page_progress(self):
@@ -232,14 +232,14 @@ class NewProjectDialog(QDialog):
             for k, c in self.checks.items():
                 c.setVisible(k in self.tpl.options); c.setChecked(k in ("git", "readme", "essentials"))
             self.tools.setText(self._tool_hint())
-            ai, have = self._is_ai(), claude_cli.available()
+            ai, have = self._is_ai(), backend.available()
             self.lang_combo.setVisible(ai); self.lang_combo.setCurrentIndex(0)
             self.desc_label.setText("Beschreibe dein Projekt:" if ai else "Claude passt das Projekt nach deiner Beschreibung an (optional):")
             self.desc.setEnabled(have)
             self.ai_hint.setText(
-                "Claude legt Dateien nur in diesem Projektordner an und hat keine Shell. Deine Beschreibung geht über deine "
-                "Claude-Code-Anmeldung an Anthropic; die Nutzung zählt wie normale Claude-Nutzung." if have else
-                "Die Claude-CLI ('claude') wurde nicht gefunden – installiere und melde dich an, um diese Funktion zu nutzen.")
+                "Claude legt Dateien nur in diesem Projektordner an und hat keine Shell. Deine Beschreibung geht über "
+                + ("deinen API-Schlüssel" if backend.provider() == "api" else "deine Claude-Code-Anmeldung") + " an Anthropic; die Nutzung wird abgerechnet bzw. zählt wie normale Claude-Nutzung."
+                if have else backend.unavailable_message().replace("**", "") + " (Projekt-Assistent: Extras → Optionen ist auch ohne Projekt erreichbar.)")
             self._check_desc()
             if not ai:
                 self.next.setEnabled(True)
@@ -283,7 +283,7 @@ class NewProjectDialog(QDialog):
         self.setCursor(Qt.ArrowCursor)
         self.settings.setValue("new_project_location", str(loc))
         desc = self.desc.toPlainText().strip()
-        if desc and claude_cli.available():
+        if desc and backend.available():
             return self._start_ai(desc)
         self.accept()
 

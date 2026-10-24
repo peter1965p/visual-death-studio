@@ -1,0 +1,242 @@
+"""Extras → Optionen: Editor, IntelliSense, Designer, Claude (lokale CLI oder eigener API-Schlüssel), Import/Export."""
+import json
+import shutil
+import threading
+from pathlib import Path
+
+from PySide6.QtCore import QUrl, Qt, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                               QListWidget, QMessageBox, QPushButton, QRadioButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+
+from .. import options
+from ..ai import api, keystore
+from ..ai.completion import MODELS
+
+CATEGORIES = ["Allgemein", "Text-Editor", "IntelliSense", "Designer", "Claude"]
+EFFORT_LABELS = {"": "(Standard des Modells)", "low": "low – schnell", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max – am gründlichsten"}
+
+
+def note(text: str) -> QLabel:
+    lab = QLabel(text); lab.setWordWrap(True); lab.setStyleSheet("color:#8fa3c7")
+    return lab
+
+
+class OptionsDialog(QDialog):
+    _tested = Signal(bool, str)
+
+    def __init__(self, win=None, parent=None):
+        super().__init__(parent or win)
+        self.win = win
+        self.setWindowTitle("Optionen"); self.resize(780, 560)
+        self.fields: dict = {}                                   # Optionsschlüssel -> (Widget, Getter, Setter)
+        self.nav = QListWidget(); self.nav.setFixedWidth(170)
+        self.nav.addItems(CATEGORIES)
+        self.pages = QStackedWidget()
+        for build in (self._page_general, self._page_editor, self._page_intellisense, self._page_designer, self._page_claude):
+            self.pages.addWidget(build())
+        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Apply | QDialogButtonBox.Cancel | QDialogButtonBox.RestoreDefaults)
+        bb.button(QDialogButtonBox.Ok).clicked.connect(self._ok)
+        bb.button(QDialogButtonBox.Apply).clicked.connect(self.apply)
+        bb.button(QDialogButtonBox.Cancel).clicked.connect(self.reject)
+        bb.button(QDialogButtonBox.RestoreDefaults).setText("Auf Standard")
+        bb.button(QDialogButtonBox.RestoreDefaults).clicked.connect(self._defaults)
+        body = QHBoxLayout(); body.addWidget(self.nav); body.addWidget(self.pages, 1)
+        lay = QVBoxLayout(self); lay.addLayout(body); lay.addWidget(bb)
+        self._tested.connect(self._show_test)
+        self.load()
+
+    # --- Feld-Helfer ------------------------------------------------------------------------------
+    def _bool(self, key, text):
+        w = QCheckBox(text)
+        self.fields[key] = (w, w.isChecked, w.setChecked)
+        return w
+
+    def _int(self, key, suffix=""):
+        w = QSpinBox(); w.setRange(*options.LIMITS[key]); w.setSuffix(suffix)
+        self.fields[key] = (w, w.value, w.setValue)
+        return w
+
+    def _text(self, key, placeholder=""):
+        w = QLineEdit(); w.setPlaceholderText(placeholder)
+        self.fields[key] = (w, w.text, w.setText)
+        return w
+
+    def _combo(self, key, items: dict | list, editable=False):
+        w = QComboBox(); w.setEditable(editable)
+        if isinstance(items, dict):
+            for v, label in items.items():
+                w.addItem(label, v)
+            self.fields[key] = (w, lambda: w.currentData(), lambda v: w.setCurrentIndex(max(0, w.findData(v))))
+        else:
+            w.addItems(items)
+            self.fields[key] = (w, w.currentText, w.setEditText if editable else w.setCurrentText)
+        return w
+
+    # --- Seiten --------------------------------------------------------------------------------------
+    def _page_general(self):
+        w = QWidget(); lay = QVBoxLayout(w)
+        lay.addWidget(note("Alle Optionen gelten sofort für das ganze Programm. Gespeichert wird im Konfigurationsordner des Benutzers."))
+        for text, slot in (("Fensterlayout zurücksetzen", self._reset_layout), ("Konfigurationsordner öffnen", self._open_config),
+                           ("Einstellungen exportieren …", self._export), ("Einstellungen importieren …", self._import)):
+            b = QPushButton(text); b.clicked.connect(slot); b.setFixedWidth(260); lay.addWidget(b)
+        lay.addWidget(note("Der Export enthält nur die Optionen – nie deinen API-Schlüssel."))
+        lay.addStretch()
+        return w
+
+    def _page_editor(self):
+        w = QWidget(); lay = QVBoxLayout(w)
+        form = QFormLayout()
+        font = QPushButton("Schriftart wählen …"); font.clicked.connect(lambda: self.win and self.win.pick_editor_font())
+        form.addRow("Schrift", font)
+        form.addRow("Tab-Breite", self._int("editor/tab_width", " Zeichen"))
+        lay.addLayout(form)
+        for key, text in (("editor/use_spaces", "Tab-Taste fügt Leerzeichen ein (aus = echte Tabulatoren)"), ("editor/word_wrap", "Zeilenumbruch am Fensterrand"),
+                          ("editor/whitespace", "Leerzeichen und Tabulatoren anzeigen")):
+            lay.addWidget(self._bool(key, text))
+        box = QGroupBox("Automatisch speichern"); f2 = QFormLayout(box)
+        f2.addRow("Alle", self._int("editor/autosave_seconds", " Sekunden (0 = aus)"))
+        f2.addRow(self._bool("editor/autosave_on_focus_loss", "Beim Wechsel in ein anderes Fenster speichern"))
+        lay.addWidget(box); lay.addStretch()
+        return w
+
+    def _page_intellisense(self):
+        w = QWidget(); lay = QVBoxLayout(w)
+        lay.addWidget(self._bool("intellisense/auto", "Vorschläge automatisch beim Tippen anzeigen (Strg+Leertaste geht immer)"))
+        form = QFormLayout()
+        form.addRow("Ab Zeichen", self._int("intellisense/min_chars"))
+        form.addRow("Verzögerung", self._int("intellisense/delay_ms", " ms"))
+        lay.addLayout(form); lay.addStretch()
+        return w
+
+    def _page_designer(self):
+        w = QWidget(); lay = QVBoxLayout(w)
+        form = QFormLayout(); form.addRow("Rastergröße", self._int("designer/grid", " px")); lay.addLayout(form)
+        lay.addWidget(self._bool("designer/show_grid", "Punktraster anzeigen"))
+        lay.addWidget(self._bool("designer/snap", "Controls an Kanten und Mitten anderer Controls einrasten lassen (Fanglinien)"))
+        lay.addStretch()
+        return w
+
+    def _page_claude(self):
+        w = QWidget(); lay = QVBoxLayout(w)
+        self.r_cli = QRadioButton("Claude Code (lokale CLI, nutzt deine Anmeldung – kein API-Schlüssel nötig)")
+        self.r_api = QRadioButton("Claude-API (eigener API-Schlüssel, Abrechnung pro Token über dein Anthropic-Konto)")
+        self.fields["claude/provider"] = (self.r_api, lambda: "api" if self.r_api.isChecked() else "cli", lambda v: (self.r_api if v == "api" else self.r_cli).setChecked(True))
+        lay.addWidget(self.r_cli); lay.addWidget(self.r_api)
+
+        self.cli_box = QGroupBox("Claude Code")
+        f = QFormLayout(self.cli_box)
+        exe = shutil.which("claude")
+        f.addRow("Status", QLabel(f"gefunden: {exe}" if exe else "nicht gefunden – siehe claude.com/claude-code"))
+        f.addRow("Modell für Vervollständigung", self._combo("ai/completion_model", MODELS))
+        lay.addWidget(self.cli_box)
+
+        self.api_box = QGroupBox("Claude-API")
+        f = QFormLayout(self.api_box)
+        self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.Password); self.key.setPlaceholderText("sk-ant-… (leer lassen = gespeicherten Schlüssel behalten)")
+        show = QCheckBox("zeigen"); show.toggled.connect(lambda on: self.key.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password))
+        clear = QPushButton("Schlüssel entfernen"); clear.clicked.connect(self._clear_key)
+        row = QHBoxLayout(); row.addWidget(self.key, 1); row.addWidget(show); row.addWidget(clear)
+        self.key_status = QLabel()
+        f.addRow("API-Schlüssel", row); f.addRow("", self.key_status)
+        f.addRow("Modell (Chat, Agent)", self._combo("claude/api_model", api.MODEL_PRESETS, editable=True))
+        f.addRow("Modell (Vervollständigung)", self._combo("claude/api_completion_model", api.MODEL_PRESETS, editable=True))
+        f.addRow("Denktiefe (effort)", self._combo("claude/api_effort", EFFORT_LABELS))
+        f.addRow("Max. Ausgabe", self._int("claude/api_max_tokens", " Tokens"))
+        f.addRow("Basis-URL", self._text("claude/api_base_url", "leer = https://api.anthropic.com (nur für eigene Gateways ändern)"))
+        f.addRow(self._bool("claude/api_fallbacks", "Bei Ablehnung durch Sicherheitsfilter automatisch ein Ausweichmodell nutzen (nur offizielle API)"))
+        self.test_btn = QPushButton("Verbindung testen"); self.test_btn.clicked.connect(self._test)
+        self.test_out = QLabel(); self.test_out.setWordWrap(True)
+        t = QHBoxLayout(); t.addWidget(self.test_btn); t.addWidget(self.test_out, 1)
+        f.addRow(t)
+        lay.addWidget(self.api_box)
+        lay.addWidget(note("Datenschutz: Im API-Modus gehen deine Anfragen samt dem Code, den du mitsendest, an Anthropic. Der Schlüssel wird in einer eigenen, nur für dich "
+                           "lesbaren Datei im Konfigurationsordner gespeichert (oder aus ANTHROPIC_API_KEY gelesen) – nie in den Optionen und nie im Export."))
+        lay.addStretch()
+        self.r_cli.toggled.connect(self._provider_changed); self.r_api.toggled.connect(self._provider_changed)
+        return w
+
+    # --- Verhalten --------------------------------------------------------------------------------------
+    def _provider_changed(self, *_):
+        api_mode = self.r_api.isChecked()
+        self.api_box.setEnabled(api_mode); self.cli_box.setEnabled(not api_mode)
+
+    def _refresh_key_status(self):
+        k = keystore.load()
+        self.key_status.setText(f"Aktiv: {keystore.mask(k)} ({keystore.source()})" if k else "Kein Schlüssel hinterlegt.")
+
+    def load(self):
+        for key, (_w, _get, setter) in self.fields.items():
+            setter(options.get(key))
+        self._provider_changed(); self._refresh_key_status()
+
+    def apply(self):
+        for key, (_w, getter, _s) in self.fields.items():
+            options.set(key, getter())
+        typed = self.key.text().strip()
+        if typed:
+            keystore.save(typed); self.key.clear()
+        self._refresh_key_status()
+        if self.win:
+            self.win.statusBar().showMessage("Optionen übernommen.", 3000)
+
+    def _ok(self):
+        self.apply(); self.accept()
+
+    def _defaults(self):
+        if QMessageBox.question(self, "Optionen", "Alle Optionen auf Standardwerte zurücksetzen? (Der API-Schlüssel bleibt erhalten.)") == QMessageBox.Yes:
+            options.reset(); self.load()
+
+    def _clear_key(self):
+        keystore.clear(); self.key.clear(); self._refresh_key_status()
+
+    def _test(self):
+        """Kleine Testanfrage mit dem eingegebenen (oder gespeicherten) Schlüssel; läuft im Thread, damit die Oberfläche nicht einfriert."""
+        cfg = api.config("completion")
+        cfg.key = self.key.text().strip() or keystore.load()
+        cfg.model = self.fields["claude/api_completion_model"][1]().strip()
+        cfg.base_url = self.fields["claude/api_base_url"][1]().strip()
+        cfg.effort = "low" if cfg.supports(api.EFFORT_MODELS) else ""
+        cfg.max_tokens = 64
+        if not cfg.key:
+            return self._show_test(False, "Kein Schlüssel eingegeben oder gespeichert.")
+        self.test_btn.setEnabled(False); self.test_out.setText("Teste …")
+
+        def work():
+            try:
+                api.complete_text(cfg, "Antworte mit einem Wort.", "Sag OK.", timeout=30)
+                self._tested.emit(True, f"Verbindung in Ordnung – {cfg.model} antwortet.")
+            except Exception as e:
+                self._tested.emit(False, api.describe_error(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_test(self, ok, msg):
+        self.test_btn.setEnabled(True)
+        self.test_out.setText(("✔ " if ok else "✘ ") + msg)
+        self.test_out.setStyleSheet("color:#3dffa1" if ok else "color:#ff7a93")
+
+    def _reset_layout(self):
+        if self.win:
+            self.win.reset_layout()
+
+    def _open_config(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(keystore.key_file().parent)))
+
+    def _export(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Einstellungen exportieren", "visual-death-studio-optionen.json", "JSON (*.json)")
+        if path:
+            self.apply()
+            Path(path).write_text(json.dumps(options.export_all(), indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def _import(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Einstellungen importieren", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            n = options.import_all(json.loads(Path(path).read_text(encoding="utf-8")))
+        except (OSError, ValueError, AttributeError):
+            return QMessageBox.warning(self, "Optionen", "Die Datei ließ sich nicht lesen.")
+        self.load()
+        QMessageBox.information(self, "Optionen", f"{n} Einstellung(en) übernommen.")

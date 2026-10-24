@@ -5,3 +5,4 @@ python-lsp-server[pyflakes]>=1.12
 rope>=1.12
 pylsp-rope>=0.1.16
 debugpy>=1.8
+anthropic>=1.0

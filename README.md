@@ -18,7 +18,9 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 - **Refactorings**: Umbenennen, Verweise suchen, Formatieren, Quick Actions
 - **Erstellen** erkennt CMake, Make, Cargo, Go, .NET, Maven, Gradle und npm; eigene Build-/Clean-Befehle und weitere Einstellungen unter Projekt → Eigenschaften
 - **Projekt-Assistent** inklusive „Mit Claude erstellen“
-- **Claude-Chat**, Diff-/Review-Ansicht, Git-Änderungen, Paket-Manager, Terminal
+- **Claude-Chat und -Vervollständigung** wahlweise über die lokale Claude-Code-CLI **oder mit eigenem API-Schlüssel** (Extras → Optionen → Claude; Agent mit Dateiwerkzeugen im Projektordner, Modellwahl, Verbindungstest)
+- **Optionen** (Strg+,): Editor (Tab-Breite, Zeilenumbruch, Leerraum, Autospeichern), IntelliSense, Designer-Raster, Claude-Anbieter, Export/Import
+- Diff-/Review-Ansicht, Git-Änderungen, Paket-Manager, Terminal
 
 ## Installation
 
@@ -36,8 +38,9 @@ Projekte bleiben unberührt).
 Ohne Skript: `python -m venv venv && venv/bin/pip install -r requirements.txt && venv/bin/python run.py`.
 
 Compiler, Debugger und Sprachserver (gcc, gdb, clangd, node, go, dlv, java, dotnet, …) werden nicht mitgeliefert; die
-jeweilige Funktion ist verfügbar, sobald das Werkzeug installiert ist. Die Claude-Funktionen benötigen die lokale
-`claude`-CLI.
+jeweilige Funktion ist verfügbar, sobald das Werkzeug installiert ist. Die Claude-Funktionen brauchen entweder die lokale
+`claude`-CLI oder einen eigenen Anthropic-API-Schlüssel (Datenschutz: Dein Code geht in beiden Fällen an Anthropic; der Schlüssel liegt in einer
+nur für dich lesbaren Datei im Konfigurationsordner, nie in den Optionen).
 
 ## Tests
 

@@ -138,6 +138,14 @@ class Documents(QTabWidget):
         self.saved.emit(doc)
         return True
 
+    def save_modified_code(self):
+        """Für Autospeichern: nur geänderte Code-Dokumente (Formulare werden bewusst nicht im Hintergrund neu erzeugt)."""
+        n = 0
+        for d in list(self.docs.values()):
+            if d.kind == "code" and d.modified:
+                d.save(); self.saved.emit(d); n += 1
+        return n
+
     def save_all(self):
         for d in list(self.docs.values()):
             if d.modified:

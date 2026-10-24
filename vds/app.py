@@ -36,6 +36,7 @@ from .docks.tools import Breakpoints, Toolbox
 from .editor import code_editor
 from .editor.code_editor import set_default_font
 from .editor.documents import FORM_SUFFIX, Documents
+from . import options
 from .icons import icon
 from .theme import C, apply_palette, stylesheet
 
@@ -95,6 +96,11 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_status()
         self._wire()
+        self._autosave = QTimer(self)
+        self._autosave.timeout.connect(self._autosave_tick)
+        QApplication.instance().applicationStateChanged.connect(self._app_state)
+        options.bus.changed.connect(self._option_changed)
+        self._apply_options()
         self.set_root(self.root)
         self._restore_session()
         self.restoreGeometry(self.settings.value("geometry") or b"")
@@ -235,6 +241,7 @@ class MainWindow(QMainWindow):
             testdiscover=A("Tests neu entdecken", self.tests.discover),
             testcancel=A("Testlauf abbrechen", self.tests.cancel),
             pkgs=A("Paket-Manager", self.open_packages, "Ctrl+Alt+P"),
+            options=A("Optionen…", self.show_options, "Ctrl+,"),
             editorfont=A("Editor-Schrift…", self.pick_editor_font),
             cmpfiles=A("Dateien vergleichen…", self.compare_files),
             cmpsaved=A("Mit gespeicherter Version vergleichen", self.compare_saved),
@@ -285,6 +292,8 @@ class MainWindow(QMainWindow):
         menu("&Test", [a["testexp"], None, a["testall"], a["testfailed"], a["testdiscover"], a["testcancel"]])
         menu("&Debuggen", [a["start"], a["startnd"], a["dpause"], a["stop"], a["drestart"], None, a["stepin"], a["stepover"], a["stepout"], None, a["togglebp"], a["clearbp"]])
         t = menu("E&xtras", [])
+        t.addAction(a["options"])
+        t.addSeparator()
         t.addAction(a["pkgs"])
         t.addAction(a["editorfont"])
         t.addAction(a["askclaude"])
@@ -460,6 +469,41 @@ class MainWindow(QMainWindow):
             if d.kind == "code":
                 d.view.refresh_font(f)
         self.statusBar().showMessage(f"Editor-Schrift: {f.family()}, {f.pointSize()} pt", 4000)
+
+    # --- Optionen -----------------------------------------------------------------------------------
+    def show_options(self):
+        from .ui.options_dialog import OptionsDialog
+        OptionsDialog(self).exec()
+
+    def _option_changed(self, key: str):
+        self._apply_options(key)
+
+    def _apply_options(self, key: str = ""):
+        """Optionen auf offene Editoren, Designer, Autospeichern und den Claude-Anbieter anwenden (key leer = alles)."""
+        if not key or key.startswith(("editor/", "intellisense/")):
+            for d in self.docs.docs.values():
+                if d.kind == "code":
+                    d.view.apply_options()
+            secs = options.get("editor/autosave_seconds")
+            self._autosave.stop()
+            if secs > 0:
+                self._autosave.start(secs * 1000)
+        if not key or key.startswith("designer/"):
+            from .designer import canvas
+            canvas.configure(options.get("designer/grid"), options.get("designer/snap"), options.get("designer/show_grid"))
+            for d in self.docs.docs.values():
+                if d.kind == "form":
+                    d.view.canvas.update(); d.view.canvas.surface.update()
+        if not key or key.startswith("claude/") or key == "ai/completion_model":
+            self.chat.refresh_backend()
+
+    def _autosave_tick(self):
+        if self.docs.save_modified_code():
+            self.statusBar().showMessage("Automatisch gespeichert.", 2000)
+
+    def _app_state(self, state):
+        if state != Qt.ApplicationActive and options.get("editor/autosave_on_focus_loss"):
+            self._autosave_tick()
 
     def open_tests(self):
         self.d_tests.show(); self.d_tests.raise_()
