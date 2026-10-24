@@ -177,3 +177,29 @@ def test_diff_is_readable(tmp_path):
     p = writer.css_plans(tmp_path, info("p", classes=["a"]), {"color": "#0f0"})[0]
     d = p.diff(tmp_path.resolve())
     assert "--- a/s.css" in d and "-.a { color: red; }" in d and "+.a { color: #0f0; }" in d
+
+
+# --- PHP-Anwendungsserver (RoadRunner, FrankenPHP, Swoole, Octane) --------------------------------------------------------
+# Hinweis: Die Beispielausgaben entsprechen den üblichen Logformaten, stammen aber nicht aus echten Läufen (die Programme sind nicht installiert).
+@pytest.mark.parametrize("text,expect", [
+    ('{"level":"info","msg":"http server was started","address":"[::]:8080"}', "http://localhost:8080"),
+    ('INFO\thttp\thttp server was started\t{"address": "0.0.0.0:9000"}', "http://localhost:9000"),
+    ("Caddy serving on :8080", "http://localhost:8080"),
+    ('{"level":"info","msg":"serving initial configuration"}\nFrankenPHP started, listening on localhost:8443', "http://localhost:8443"),
+    ("Swoole http server is started at 0.0.0.0:9501", "http://localhost:9501"),
+    ("   INFO  Server running on [http://127.0.0.1:8000].\n   Local: http://127.0.0.1:8000", "http://127.0.0.1:8000"),
+    ('{"msg":"rpc listening","address":"127.0.0.1:6001"}', None),
+    ("Network: listening on 192.168.1.5:3000", None),
+])
+def test_app_server_ports_are_found_without_scheme(text, expect):
+    assert devserver.find_url(text) == expect
+
+
+def test_detect_command_for_octane_roadrunner_and_frankenphp(tmp_path):
+    (tmp_path / "artisan").write_text("x"); (tmp_path / "composer.json").write_text(json.dumps({"require": {"laravel/octane": "^2.0"}}))
+    assert devserver.detect_command(tmp_path) == "php artisan octane:start"
+    other = tmp_path / "rr"; other.mkdir()
+    (other / ".rr.yaml").write_text("version: '3'"); assert devserver.detect_command(other) == "rr serve"
+    (other / "rr").write_text("#!/bin/sh"); assert devserver.detect_command(other) == "./rr serve"
+    fp = tmp_path / "fp"; fp.mkdir(); (fp / "Caddyfile").write_text("{ frankenphp }")
+    assert devserver.detect_command(fp) == "frankenphp run"
