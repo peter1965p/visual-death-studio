@@ -15,9 +15,9 @@ from ..theme import EDITOR_FONT
 from ..ai.completion import build_prompt
 from .completion import CompletionPopup, SignatureTip, SuggestionCard
 from .highlighter import PygmentsHighlighter
-from ..theme import t
+from ..theme import t as tc
 
-SEV_COLOR = {k: t(v) for k, v in {"error": "#ff4d6d", "warning": "#ffc474", "info": "#5ee7ff"}.items()}
+SEV_COLOR = {k: tc(v) for k, v in {"error": "#ff4d6d", "warning": "#ffc474", "info": "#5ee7ff"}.items()}
 
 
 class _Gutter(QWidget):
@@ -151,7 +151,7 @@ class CodeEditor(QPlainTextEdit):
 
     def paint_gutter(self, e):
         p = QPainter(self.gutter)
-        p.fillRect(e.rect(), QColor(t("#080a16")))
+        p.fillRect(e.rect(), QColor(tc("#080a16")))
         cur = self.textCursor().blockNumber()
         block = self.firstVisibleBlock()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
@@ -162,13 +162,13 @@ class CodeEditor(QPlainTextEdit):
                 if n in self.breakpoints:
                     y = top + (h - 10) // 2
                     if n in self.bp_disabled:                       # deaktiviert: Ring
-                        p.setBrush(Qt.NoBrush); p.setPen(QPen(QColor(t("#ff2d6f")), 1.5)); p.drawEllipse(5, y + 1, 8, 8)
+                        p.setBrush(Qt.NoBrush); p.setPen(QPen(QColor(tc("#ff2d6f")), 1.5)); p.drawEllipse(5, y + 1, 8, 8)
                     else:
-                        p.setBrush(QColor(t("#ff2d6f"))); p.setPen(Qt.NoPen); p.drawEllipse(4, y, 10, 10)
+                        p.setBrush(QColor(tc("#ff2d6f"))); p.setPen(Qt.NoPen); p.drawEllipse(4, y, 10, 10)
                         if self.bp_conditions.get(n):               # bedingt: weißes Kreuz
                             p.setPen(QPen(QColor("white"), 1.4)); p.drawLine(6, y + 5, 12, y + 5); p.drawLine(9, y + 2, 9, y + 8)
                 if n == self.exec_line:                             # Ausführungspfeil
-                    p.setBrush(QColor(t("#ffd60a"))); p.setPen(Qt.NoPen)
+                    p.setBrush(QColor(tc("#ffd60a"))); p.setPen(Qt.NoPen)
                     p.drawPolygon(QPolygonF([QPointF(2, top + 3), QPointF(16, top + h / 2), QPointF(2, top + h - 3)]))
                 p.setPen(QColor("#9ad7ff" if block.blockNumber() == cur else "#4d5b82"))
                 p.drawText(0, top, self.gutter.width() - 6, h, Qt.AlignRight | Qt.AlignVCenter, str(n))
@@ -242,7 +242,7 @@ class CodeEditor(QPlainTextEdit):
     def refresh_selections(self):
         sels = []
         line = QTextEdit.ExtraSelection()
-        line.format.setBackground(QColor(t("#0f1530")))
+        line.format.setBackground(QColor(tc("#0f1530")))
         line.format.setProperty(QTextFormat.FullWidthSelection, True)
         line.cursor = self.textCursor()
         line.cursor.clearSelection()
@@ -601,7 +601,7 @@ class CodeEditor(QPlainTextEdit):
         parts: list = []
         for sev, msg, ln, dcol in self.diagnostics:                # Fehlertext zuerst
             if ln - 1 == line:
-                color = t({"error": "#ff4d6d", "warning": "#ffc474"}.get(sev, "#5ee7ff"))
+                color = tc({"error": "#ff4d6d", "warning": "#ffc474"}.get(sev, "#5ee7ff"))
                 parts.append(f"<span style='color:{color}'>● {html.escape(msg)}</span>")
         expr = self._expr_at(text, col)
 

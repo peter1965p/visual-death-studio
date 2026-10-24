@@ -7,9 +7,9 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem
                                QTabWidget, QVBoxLayout, QWidget)
 
 from ..diff import changes as C
-from ..theme import t
+from ..theme import t as tc
 
-STATUS_COLOR = {k: t(v) for k, v in {"M": "#ffc474", "A": "#3dffa1", "D": "#ff4d6d", "?": "#3dffa1"}.items()}
+STATUS_COLOR = {k: tc(v) for k, v in {"M": "#ffc474", "A": "#3dffa1", "D": "#ff4d6d", "?": "#3dffa1"}.items()}
 STATUS_NAME = {"M": "geändert", "A": "neu", "D": "gelöscht"}
 
 

@@ -11,14 +11,14 @@ from . import layouts
 from ..icons import control_icon
 from .controls import BY_TYPE, apply_prop, font_decls, make_widget, new_props
 from .layouts import CONTAINERS, LAYOUT_KEYS
-from ..theme import t
+from ..theme import t as tc
 
 M, TB, GRID, SNAP, HS = 24, 30, 8, 5, 7        # Rand, Titelleiste, Raster, Snap-Distanz, Handle-Größe
 HANDLES = [(0, 0), (.5, 0), (1, 0), (1, .5), (1, 1), (.5, 1), (0, 1), (0, .5)]
 CURSORS = [Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorCursor,
            Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor, Qt.SizeHorCursor]
 MIME = "application/x-vds-control"
-GUIDE = QColor(t("#e040a0"))
+GUIDE = QColor(tc("#e040a0"))
 SNAP_ON, SHOW_GRID = True, True               # Fanglinien und Punktraster (Extras → Optionen → Designer)
 TRAY_H, CHIP_W = 36, 156                       # Komponentenleiste unter dem Formular
 
@@ -45,7 +45,7 @@ def configure(grid: int | None = None, snap: bool | None = None, show_grid: bool
 
 
 class Surface(QWidget):
-    bg = QColor(t("#f0f0f0"))
+    bg = QColor(tc("#f0f0f0"))
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -69,7 +69,7 @@ class Overlay(QWidget):
         for cid in c.sel:
             if not c._visible(cid):
                 continue
-            p.setPen(QPen(QColor(t("#00b8d9")), 1, Qt.DotLine)); p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(tc("#00b8d9")), 1, Qt.DotLine)); p.setBrush(Qt.NoBrush)
             p.drawRect(c.canvas_rect(cid).adjusted(0, 0, -1, -1))
         for r in c.handle_rects().values():
             p.setPen(QColor("black")); p.setBrush(QColor("white")); p.drawRect(r)
@@ -81,7 +81,7 @@ class Overlay(QWidget):
                 p.drawLine(M, v + M + TB, M + c.model["width"], v + M + TB)
         if c.band:
             r = QRect(c.band[0], c.band[1]).normalized()
-            p.setPen(QPen(QColor(t("#00e5ff")), 1, Qt.DashLine)); p.setBrush(QColor(0, 229, 255, 40)); p.drawRect(r)
+            p.setPen(QPen(QColor(tc("#00e5ff")), 1, Qt.DashLine)); p.setBrush(QColor(0, 229, 255, 40)); p.drawRect(r)
 
 
 class Canvas(QWidget):
@@ -207,7 +207,7 @@ class Canvas(QWidget):
         self.setFixedSize(max(m["width"] + 2 * M, comps * CHIP_W + 2 * M), m["height"] + TB + 2 * M + (TRAY_H + 10 if comps else 0))
         self.surface.setGeometry(M, M + TB, m["width"], m["height"])
         c = QColor(m.get("back_color") or "#f0f0f0")
-        self.surface.bg = c if c.isValid() else QColor(t("#f0f0f0"))
+        self.surface.bg = c if c.isValid() else QColor(tc("#f0f0f0"))
         decl = font_decls(m)
         self.surface.setStyleSheet(LIGHT + (f"#formsurface * {{ {decl} }}" if decl else ""))
         self.overlay.setGeometry(self.rect()); self.overlay.raise_()
@@ -632,12 +632,12 @@ class Canvas(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(t("#0a0d1f")))
+        p.fillRect(self.rect(), QColor(tc("#0a0d1f")))
         w = self.model["width"]
         bar = QRect(M, M, w, TB)
-        p.fillRect(bar, QColor(t("#ffffff")))
+        p.fillRect(bar, QColor(tc("#ffffff")))
         p.setPen(QColor("#000")); f = QFont(self.font()); f.setPointSize(9); p.setFont(f)
-        p.fillRect(M + 8, M + 9, 12, 12, QColor(t("#00a8c8")))
+        p.fillRect(M + 8, M + 9, 12, 12, QColor(tc("#00a8c8")))
         p.drawText(bar.adjusted(30, 0, -120, 0), Qt.AlignVCenter | Qt.AlignLeft, self.model["title"])
         p.drawText(QRect(M + w - 138, M, 46, TB), Qt.AlignCenter, "–")
         p.drawText(QRect(M + w - 92, M, 46, TB), Qt.AlignCenter, "□")
@@ -645,14 +645,14 @@ class Canvas(QWidget):
         p.setPen(QColor("#888")); p.drawRect(M - 1, M - 1, w + 1, self.model["height"] + TB + 1)
         rects = self.tray_rects()
         if rects:
-            p.setPen(QColor(t("#6f82ad"))); p.drawText(M, M + TB + self.model["height"] + 12, "Komponenten")
+            p.setPen(QColor(tc("#6f82ad"))); p.drawText(M, M + TB + self.model["height"] + 12, "Komponenten")
             for c in self.model["components"]:
                 r = rects[c["name"]]
                 on = c["name"] in self.sel
-                p.setBrush(QColor(t("#1b2a5c" if on else "#121a3d"))); p.setPen(QPen(QColor(t("#00e5ff" if on else "#33427a")), 1.4 if on else 1))
+                p.setBrush(QColor(tc("#1b2a5c" if on else "#121a3d"))); p.setPen(QPen(QColor(tc("#00e5ff" if on else "#33427a")), 1.4 if on else 1))
                 p.drawRoundedRect(r, 6, 6)
                 control_icon(c["type"]).paint(p, QRect(r.x() + 6, r.y() + 6, 16, 16))
-                p.setPen(QColor(t("#dbe6ff"))); p.drawText(r.adjusted(28, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, c["name"])
+                p.setPen(QColor(tc("#dbe6ff"))); p.drawText(r.adjusted(28, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, c["name"])
 
 
 class FormDesigner(QWidget):
@@ -669,7 +669,7 @@ class FormDesigner(QWidget):
         self.canvas = Canvas(self)
         self.canvas.load(model)
         sa = QScrollArea(); sa.setWidget(self.canvas); sa.setFrameShape(QScrollArea.NoFrame)
-        sa.setStyleSheet(t("QScrollArea { background:#0a0d1f; }"))
+        sa.setStyleSheet(tc("QScrollArea { background:#0a0d1f; }"))
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.addWidget(sa)
         self.setFocusProxy(self.canvas)
 

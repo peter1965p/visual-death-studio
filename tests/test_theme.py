@@ -96,3 +96,42 @@ def test_stored_theme_is_read_from_settings_unless_overridden(qapp, monkeypatch)
     monkeypatch.setenv("VDS_THEME", "neon"); assert theme.stored_theme() == "neon"
     monkeypatch.setenv("VDS_THEME", "quatsch"); assert theme.stored_theme() == "neon"
     options.reset()
+
+
+# --- Stellen, an denen Farben zur Laufzeit gesetzt werden (nicht nur beim Import) ----------------------------------------------
+def test_wizard_list_paints_without_errors_in_both_schemes(qapp, tmp_path):
+    from vds.projects.wizard import NewProjectDialog
+    dlg = NewProjectDialog(None, tmp_path)
+    dlg.resize(900, 640); dlg.show(); qapp.processEvents()
+    img = dlg.grab().toImage()                                         # zeichnet die Vorlagenliste (Delegate mit Farben)
+    assert img.width() > 500 and dlg.list.count() > 10
+    out = run_light("""
+        import tempfile
+        from pathlib import Path
+        from PySide6.QtWidgets import QApplication
+        app = QApplication([])
+        from vds.theme import apply_palette, stylesheet
+        app.setStyle("Fusion"); apply_palette(app); app.setStyleSheet(stylesheet())
+        from vds.projects.wizard import NewProjectDialog
+        d = NewProjectDialog(None, Path(tempfile.mkdtemp())); d.resize(900, 640); d.show(); app.processEvents()
+        print(d.grab().toImage().width(), d.list.count())
+    """)
+    assert out.split()[0] == "900"
+
+
+def test_immediate_window_and_debug_panels_use_colors_at_runtime(qapp):
+    from vds.docks.debug_panels import ImmediatePanel
+    p = ImmediatePanel()
+    p.edit.setText("1 + 1"); p._send()                                  # früher verdeckte die lokale Variable t die Farbfunktion
+    p.line("Fehler", None)
+    assert "> 1 + 1" in p.out.toPlainText() and "Fehler" in p.out.toPlainText()
+
+
+def test_completion_popup_and_cards_build_and_paint(qapp):
+    from vds.editor.code_editor import CodeEditor
+    e = CodeEditor("a.py"); e.resize(400, 200); e.show()
+    e.popup.list.addItem("x"); e.sigtip.show_sig({"label": "f(a, b)", "active": (2, 3), "doc": "Doku"}, e.mapToGlobal(e.rect().center()))
+    e.card.show_suggestion("return 1", e.mapToGlobal(e.rect().center()), 300, "a.py", False)
+    qapp.processEvents()
+    assert e.sigtip.text() and e.card.isVisible()
+    e.sigtip.hide(); e.card.hide()

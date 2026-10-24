@@ -7,9 +7,9 @@ from PySide6.QtWidgets import QLineEdit, QPlainTextEdit, QTableWidget, QTableWid
 
 from ..icons import icon
 from ..theme import EDITOR_FONT
-from ..theme import t
+from ..theme import t as tc
 
-COLORS = {k: t(v) for k, v in {"stdout": "#dbe6ff", "stderr": "#ff7a93", "info": "#7f93bd", "ok": "#3dffa1"}.items()}
+COLORS = {k: tc(v) for k, v in {"stdout": "#dbe6ff", "stderr": "#ff7a93", "info": "#7f93bd", "ok": "#3dffa1"}.items()}
 
 
 class OutputPane(QWidget):
@@ -44,7 +44,7 @@ class ErrorList(QTableWidget):
     activated = Signal(str, int, int)
     countChanged = Signal(int, int)  # Fehler, Warnungen
 
-    ICON = {"error": ("error", t("#ff4d6d")), "warning": ("warning", t("#ffc474")), "info": ("info", t("#5ee7ff"))}
+    ICON = {"error": ("error", tc("#ff4d6d")), "warning": ("warning", tc("#ffc474")), "info": ("info", tc("#5ee7ff"))}
 
     def __init__(self, parent=None):
         super().__init__(0, 5, parent)

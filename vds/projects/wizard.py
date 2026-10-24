@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                                QWidget)
 
 from ..ai import backend
-from ..theme import t
+from ..theme import t as tc
 from ..branding import SETTINGS_APP, SETTINGS_ORG
 from ..ai.prompts import LANG_HINTS, SYSTEM_PROJECT, parse_main, project_prompt
 from ..docks.explorer import LANG_COLOR
@@ -21,7 +21,7 @@ ABBR = {"claude": "✦", "typescript": "TS", "vue": "Vu", "php": "PHP", "python"
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 OPTION_LABELS = {"essentials": "Linux-Essentials einbinden (Zwischenablage, Geräteinfo, Einstellungen …)", "git": "Git-Repository initialisieren (inkl. .gitignore)", "readme": "README.md erstellen",
                  "venv": "Virtuelle Python-Umgebung (.venv) anlegen"}
-CSS = t("""
+CSS = tc("""
 QLabel#title { font-size: 22px; font-weight: 300; }
 QLabel#sub { color: #8fa3c7; }
 QLabel#err { color: #ff7a93; }
@@ -60,16 +60,16 @@ class TemplateDelegate(QStyledItemDelegate):
         r = option.rect
         p.drawPixmap(r.x() + 12, r.y() + 16, badge(t.lang_id))
         f = QFont(option.font); f.setPointSize(11); f.setBold(True)
-        p.setFont(f); p.setPen(QColor(t("#f1f1f1")))
+        p.setFont(f); p.setPen(QColor(tc("#f1f1f1")))
         p.drawText(QRect(r.x() + 66, r.y() + 8, r.width() - 80, 20), Qt.AlignVCenter, t.name)
-        f.setBold(False); f.setPointSize(9); p.setFont(f); p.setPen(QColor(t("#9d9d9d")))
+        f.setBold(False); f.setPointSize(9); p.setFont(f); p.setPen(QColor(tc("#9d9d9d")))
         p.drawText(QRect(r.x() + 66, r.y() + 29, r.width() - 80, 18), Qt.AlignVCenter, t.description)
         x = r.x() + 66
         for tag in (t.lang, t.kind):
             w = p.fontMetrics().horizontalAdvance(tag) + 14
-            p.setPen(QColor(t("#5a5a5e"))); p.setBrush(Qt.NoBrush)
+            p.setPen(QColor(tc("#5a5a5e"))); p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(x, r.y() + 49, w, 16, 3, 3)
-            p.setPen(QColor(t("#c5c5c5"))); p.drawText(QRect(x, r.y() + 49, w, 16), Qt.AlignCenter, tag)
+            p.setPen(QColor(tc("#c5c5c5"))); p.drawText(QRect(x, r.y() + 49, w, 16), Qt.AlignCenter, tag)
             x += w + 6
 
 
