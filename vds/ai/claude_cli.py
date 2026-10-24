@@ -11,7 +11,7 @@ FILE_TOOLS = "Write,Edit,Read,Glob,Grep"
 
 
 def find() -> str | None:
-    """Pfad der Claude-CLI. Ein per Starter/Menü gestartetes Programm erbt oft einen PATH ohne ~/.local/bin oder nvm – daher auch die üblichen Orte."""
+    """Pfad von Claude Code (`claude`). Ein per Starter/Menü gestartetes Programm erbt oft einen PATH ohne ~/.local/bin oder nvm – daher auch die üblichen Orte."""
     found = shutil.which("claude")
     if found:
         return found
@@ -87,7 +87,7 @@ class ClaudeProcess(QObject):
     def _error(self, e):
         if e == QProcess.FailedToStart and self.proc:
             self.proc = None
-            self.finished.emit(False, "Die Claude-CLI ('claude') konnte nicht gestartet werden.", "")
+            self.finished.emit(False, "Claude Code ('claude') konnte nicht gestartet werden.", "")
 
     def _read(self):
         self._buf += bytes(self.proc.readAllStandardOutput()).decode("utf-8", "replace")

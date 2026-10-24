@@ -1,4 +1,4 @@
-"""Claude-Chat-Panel: spricht über die lokale Claude-CLI mit dem geöffneten Projekt."""
+"""Claude-Chat-Panel: spricht über das lokale Claude Code mit dem geöffneten Projekt."""
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, Signal
@@ -57,7 +57,7 @@ class ChatPanel(QWidget):
 
     # --- Zustand ---------------------------------------------------------------------------
     def _attach_agent(self):
-        """Agent des gewählten Anbieters (Claude-CLI oder API) anlegen und verdrahten."""
+        """Agent des gewählten Anbieters (Claude Code oder API) anlegen und verdrahten."""
         self.claude = backend.make_agent(self)
         self.claude.text.connect(lambda t: self._add(t.strip()))
         self.claude.tool.connect(lambda t: self._add(f"*⚙ {t}*"))

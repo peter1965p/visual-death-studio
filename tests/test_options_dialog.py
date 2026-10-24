@@ -112,7 +112,9 @@ def test_autosave_timer_and_focus_loss(win, tmp_path):
 
 def test_claude_page_toggles_providers_and_stores_key(win):
     dlg = OptionsDialog(win)
-    assert dlg.r_cli.isChecked() and dlg.cli_box.isEnabled() and not dlg.api_box.isEnabled()
+    assert dlg.r_auto.isChecked() and dlg.cli_box.isEnabled() and dlg.api_box.isEnabled()
+    dlg.r_cli.setChecked(True)
+    assert dlg.cli_box.isEnabled() and not dlg.api_box.isEnabled()
     dlg.r_api.setChecked(True)
     assert dlg.api_box.isEnabled() and not dlg.cli_box.isEnabled()
     dlg.key.setText("  sk-ant-api03-geheim-abcdefgh  ")

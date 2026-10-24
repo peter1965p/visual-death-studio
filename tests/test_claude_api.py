@@ -56,9 +56,9 @@ def test_key_is_stored_privately_and_masked(qapp, monkeypatch):
 
 def test_options_defaults_types_and_limits(qapp):
     try:
-        assert options.get("editor/tab_width") == 4 and options.get("editor/use_spaces") is True and options.get("claude/provider") == "cli"
+        assert options.get("editor/tab_width") == 4 and options.get("editor/use_spaces") is True and options.get("claude/provider") == "auto"
         options.set("editor/tab_width", 999); assert options.get("editor/tab_width") == 16          # begrenzt
-        options.set("claude/provider", "unsinn"); assert options.get("claude/provider") == "cli"
+        options.set("claude/provider", "unsinn"); assert options.get("claude/provider") == "auto"
         options.set("editor/word_wrap", "true"); assert options.get("editor/word_wrap") is True
         seen = []
         options.bus.changed.connect(seen.append)
@@ -271,3 +271,20 @@ def test_cli_found_outside_path(tmp_path, monkeypatch):
     exe.unlink()
     monkeypatch.setattr(claude_cli.shutil, "which", lambda _n: None)
     assert claude_cli.find() is None
+
+
+def test_auto_provider_prefers_claude_code_then_api(qapp, monkeypatch):
+    """„auto“: Claude Code, wenn installiert; sonst die API, wenn ein Schlüssel da ist; sonst eine verständliche Meldung."""
+    from vds.ai import claude_cli
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    try:
+        options.set("claude/provider", "auto")
+        monkeypatch.setattr(claude_cli, "find", lambda: "/x/claude")
+        keystore.save("sk-x")
+        assert backend.provider() == "cli" and backend.available()                       # CLI hat Vorrang
+        monkeypatch.setattr(claude_cli, "find", lambda: None)
+        assert backend.provider() == "api" and backend.available()                       # Rückfall auf die API
+        keystore.clear()
+        assert backend.provider() == "cli" and not backend.available() and "Weder Claude Code" in backend.unavailable_message()
+    finally:
+        keystore.clear(); options.set("claude/provider", "auto")

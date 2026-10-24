@@ -1,6 +1,5 @@
 """Extras → Optionen: Editor, IntelliSense, Designer, Claude (lokale CLI oder eigener API-Schlüssel), Import/Export."""
 import json
-import shutil
 import threading
 from pathlib import Path
 
@@ -10,7 +9,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QListWidget, QMessageBox, QPushButton, QRadioButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import options
-from ..ai import api, keystore
+from ..ai import api, claude_cli, keystore
 from ..ai.completion import MODELS
 
 CATEGORIES = ["Allgemein", "Text-Editor", "IntelliSense", "Designer", "Web-Vorschau", "Claude"]
@@ -141,14 +140,16 @@ class OptionsDialog(QDialog):
 
     def _page_claude(self):
         w = QWidget(); lay = QVBoxLayout(w)
+        self.r_auto = QRadioButton("Automatisch (Claude Code, wenn installiert – sonst die API, falls ein Schlüssel hinterlegt ist)")
         self.r_cli = QRadioButton("Claude Code (lokale CLI, nutzt deine Anmeldung – kein API-Schlüssel nötig)")
         self.r_api = QRadioButton("Claude-API (eigener API-Schlüssel, Abrechnung pro Token über dein Anthropic-Konto)")
-        self.fields["claude/provider"] = (self.r_api, lambda: "api" if self.r_api.isChecked() else "cli", lambda v: (self.r_api if v == "api" else self.r_cli).setChecked(True))
-        lay.addWidget(self.r_cli); lay.addWidget(self.r_api)
+        self.fields["claude/provider"] = (self.r_auto, lambda: "api" if self.r_api.isChecked() else "cli" if self.r_cli.isChecked() else "auto",
+                                          lambda v: {"api": self.r_api, "cli": self.r_cli}.get(v, self.r_auto).setChecked(True))
+        lay.addWidget(self.r_auto); lay.addWidget(self.r_cli); lay.addWidget(self.r_api)
 
         self.cli_box = QGroupBox("Claude Code")
         f = QFormLayout(self.cli_box)
-        exe = shutil.which("claude")
+        exe = claude_cli.find()
         f.addRow("Status", QLabel(f"gefunden: {exe}" if exe else "nicht gefunden – siehe claude.com/claude-code"))
         f.addRow("Modell für Vervollständigung", self._combo("ai/completion_model", MODELS))
         lay.addWidget(self.cli_box)
@@ -175,13 +176,14 @@ class OptionsDialog(QDialog):
         lay.addWidget(note("Datenschutz: Im API-Modus gehen deine Anfragen samt dem Code, den du mitsendest, an Anthropic. Der Schlüssel wird in einer eigenen, nur für dich "
                            "lesbaren Datei im Konfigurationsordner gespeichert (oder aus ANTHROPIC_API_KEY gelesen) – nie in den Optionen und nie im Export."))
         lay.addStretch()
-        self.r_cli.toggled.connect(self._provider_changed); self.r_api.toggled.connect(self._provider_changed)
+        for r in (self.r_auto, self.r_cli, self.r_api):
+            r.toggled.connect(self._provider_changed)
         return w
 
     # --- Verhalten --------------------------------------------------------------------------------------
     def _provider_changed(self, *_):
-        api_mode = self.r_api.isChecked()
-        self.api_box.setEnabled(api_mode); self.cli_box.setEnabled(not api_mode)
+        auto = self.r_auto.isChecked()
+        self.api_box.setEnabled(auto or self.r_api.isChecked()); self.cli_box.setEnabled(auto or self.r_cli.isChecked())
 
     def _refresh_key_status(self):
         k = keystore.load()

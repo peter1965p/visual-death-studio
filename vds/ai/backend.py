@@ -3,8 +3,16 @@ from .. import options
 from . import api, claude_cli, keystore
 
 
-def provider() -> str:
+def setting() -> str:
     return options.get("claude/provider")
+
+
+def provider() -> str:
+    """Wirksamer Anbieter: bei „auto“ Claude Code, wenn installiert, sonst die API, wenn ein Schlüssel hinterlegt ist."""
+    s = setting()
+    if s != "auto":
+        return s
+    return "cli" if claude_cli.available() or not keystore.load() else "api"
 
 
 def available() -> bool:
@@ -14,7 +22,9 @@ def available() -> bool:
 def unavailable_message() -> str:
     if provider() == "api":
         return "**Kein API-Schlüssel hinterlegt.** Trage ihn unter Extras → Optionen → Claude ein (oder setze ANTHROPIC_API_KEY)."
-    return "**Claude-CLI nicht gefunden.** Installiere Claude Code und melde dich an – oder nutze unter Extras → Optionen → Claude einen eigenen API-Schlüssel."
+    if setting() == "auto":
+        return "**Weder Claude Code noch ein API-Schlüssel gefunden.** Installiere Claude Code und melde dich an – oder trage unter Extras → Optionen → Claude einen API-Schlüssel ein."
+    return "**Claude Code nicht gefunden.** Installiere Claude Code und melde dich an – oder nutze unter Extras → Optionen → Claude einen eigenen API-Schlüssel."
 
 
 def label() -> str:
