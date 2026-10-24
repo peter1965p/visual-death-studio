@@ -1,5 +1,5 @@
 """Startbild: Neon-Totenkopf, Titel, „2026 by Peter Päffgen“ und ein Fortschrittsbalken mit Statustext."""
-from PySide6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
@@ -7,6 +7,7 @@ from . import __version__
 from .branding import APP_NAME
 
 W, H = 640, 360
+MIN_TOTAL_MS = 3500          # so lange bleibt das Startbild mindestens sichtbar (Start selbst ist meist schneller)
 CYAN, VIOLET, PINK = QColor("#00e5ff"), QColor("#b44cff"), QColor("#ff2d95")
 
 
@@ -57,11 +58,16 @@ class SplashScreen(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(W, H)
         self.value, self.text = 0.0, "Starte …"
-        self._shown = 0.0
+        self._clock = QElapsedTimer()
         scr = QGuiApplication.primaryScreen()
         if scr:
             g = scr.availableGeometry()
             self.move(g.center().x() - W // 2, g.center().y() - H // 2)
+
+    def showEvent(self, e):
+        if not self._clock.isValid():
+            self._clock.start()
+        super().showEvent(e)
 
     def step(self, percent: float, text: str):
         """Fortschritt setzen und sofort zeichnen (wird während des Starts aus dem Hauptfenster aufgerufen)."""
@@ -101,9 +107,10 @@ class SplashScreen(QWidget):
         p.drawText(QRectF(40, H - 60, W - 160, 22), Qt.AlignLeft | Qt.AlignVCenter, self.text)
         p.setPen(QColor(CYAN)); p.drawText(QRectF(W - 120, H - 60, 80, 22), Qt.AlignRight | Qt.AlignVCenter, f"{int(self.value)} %")
 
-    def finish(self, window=None, min_ms: int = 700):
-        """Ausblenden (kurz sichtbar lassen, damit es nicht aufblitzt), danach schließen."""
+    def finish(self, window=None, min_total_ms: int = MIN_TOTAL_MS):
+        """Auf 100 % setzen, insgesamt mindestens `min_total_ms` seit dem Zeigen sichtbar lassen, dann sanft ausblenden und schließen."""
         self.step(100, "Fertig")
+        min_ms = max(400, min_total_ms - (self._clock.elapsed() if self._clock.isValid() else 0))
         def fade():
             a = QPropertyAnimation(self, b"windowOpacity", self)
             a.setDuration(260); a.setStartValue(1.0); a.setEndValue(0.0); a.setEasingCurve(QEasingCurve.InQuad)
