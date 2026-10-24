@@ -117,7 +117,7 @@ class AiCompletion(QObject):
         self.proc = p
         self._timer.start()
         self.busyChanged.emit(True)
-        p.start("claude", ["-p", prompt, "--output-format", "text", "--tools", "", "--model", self.model, "--no-session-persistence",
+        p.start(claude_cli.find() or "claude", ["-p", prompt, "--output-format", "text", "--tools", "", "--model", self.model, "--no-session-persistence",
                            "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SYSTEM])
         p.closeWriteChannel()
 

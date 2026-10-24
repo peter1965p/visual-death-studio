@@ -258,3 +258,16 @@ def test_completion_cancel_ignores_late_result(fake, pump, monkeypatch):
 def test_connection_test_helper_reports_model_answer(fake, qapp):
     f = fake([sse([("text", "OK")])])
     assert api.complete_text(api.config("completion"), "Antworte kurz.", "Sag OK") == "OK"
+
+
+def test_cli_found_outside_path(tmp_path, monkeypatch):
+    """Die CLI wird auch gefunden, wenn ~/.local/bin nicht im PATH steht (Start über Starter/Menü)."""
+    from vds.ai import claude_cli
+    exe = tmp_path / ".local/bin/claude"
+    exe.parent.mkdir(parents=True); exe.write_text("#!/bin/sh\n"); exe.chmod(0o755)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setattr(claude_cli.Path, "home", classmethod(lambda cls: tmp_path))
+    assert claude_cli.find() == str(exe) and claude_cli.available()
+    exe.unlink()
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda _n: None)
+    assert claude_cli.find() is None

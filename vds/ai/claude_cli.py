@@ -1,5 +1,7 @@
 """Anbindung an die lokale Claude-Code-CLI (`claude -p`, Stream-JSON). Nutzt die bestehende Anmeldung – kein API-Key nötig."""
+import glob
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -8,8 +10,20 @@ from PySide6.QtCore import QObject, QProcess, Signal
 FILE_TOOLS = "Write,Edit,Read,Glob,Grep"
 
 
+def find() -> str | None:
+    """Pfad der Claude-CLI. Ein per Starter/Menü gestartetes Programm erbt oft einen PATH ohne ~/.local/bin oder nvm – daher auch die üblichen Orte."""
+    found = shutil.which("claude")
+    if found:
+        return found
+    home = Path.home()
+    cands = [home / ".local/bin/claude", home / ".claude/local/claude", home / ".npm-global/bin/claude", home / ".bun/bin/claude",
+             Path("/usr/local/bin/claude"), Path("/usr/bin/claude"), Path("/opt/claude/bin/claude")]
+    cands += [Path(p) for p in sorted(glob.glob(str(home / ".nvm/versions/node/*/bin/claude")), reverse=True)]
+    return next((str(c) for c in cands if c.is_file() and os.access(c, os.X_OK)), None)
+
+
 def available() -> bool:
-    return shutil.which("claude") is not None
+    return find() is not None
 
 
 def describe_tool(name: str, inp: dict, cwd: Path) -> str:
@@ -63,7 +77,7 @@ class ClaudeProcess(QObject):
         p.errorOccurred.connect(self._error)
         p.finished.connect(self._done)
         self.proc = p
-        p.start("claude", args)
+        p.start(find() or "claude", args)
         p.closeWriteChannel()
 
     def stop(self):
