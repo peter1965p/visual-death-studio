@@ -757,6 +757,14 @@ class MainWindow(QMainWindow):
     def run_project_command(self, mode) -> bool:
         """Start-Befehl aus den Projekteigenschaften (z. B. Dev-Server); gilt für F5 und Strg+F5."""
         cmd = self.project.run_cmd.strip()
+        if not cmd and mode != "build":
+            # kein Start-Befehl eingetragen: bei Dateien ohne eigenen Interpreter (html, vue, css, tsx …) und bei php im Laravel-Projekt den erkannten Dev-Server nehmen
+            doc = self.docs.current_doc()
+            target = doc.run_target if doc and doc.kind != "diff" else None
+            lang = lang_for(target) if target else None
+            auto = devserver.detect_command(self.root)
+            if auto and (lang is None or (lang.id == "php" and (self.root / "artisan").is_file())) and not (doc and doc.kind == "form" and doc.target not in designer_targets.WEB):
+                cmd = auto
         if not cmd or mode == "build":
             return False
         if self.runner.busy:

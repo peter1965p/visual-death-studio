@@ -177,3 +177,41 @@ def _computed(panel, pump, sel, prop):
     panel.eval(f"getComputedStyle(document.querySelector({json.dumps(sel)})).getPropertyValue({json.dumps(prop)})", lambda v: out.append(v))
     pump(lambda: bool(out), 5)
     return out[0] if out else ""
+
+
+# --- Start-Befehl erkennen -------------------------------------------------------------------------------------------
+def test_detect_command_for_laravel_vite_angular_and_nothing(tmp_path):
+    from vds.web import devserver
+    assert devserver.detect_command(tmp_path) is None
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"build": "tsc"}})); assert devserver.detect_command(tmp_path) is None
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"dev": "vite"}}))
+    assert devserver.detect_command(tmp_path) == "[ -d node_modules ] || npm install; npm run dev"
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"start": "ng serve"}}))
+    assert devserver.detect_command(tmp_path).endswith("npm start")
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"start": "node server.js"}})); assert devserver.detect_command(tmp_path) is None
+    (tmp_path / "artisan").write_text("#!/usr/bin/env php"); (tmp_path / "composer.json").write_text("{}")
+    assert devserver.detect_command(tmp_path) == "php artisan serve"                  # Laravel hat Vorrang
+
+
+def test_f5_uses_the_detected_dev_server_only_for_files_without_an_interpreter(qapp, pump, tmp_path, monkeypatch):
+    import os, stat
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Discard))
+    log = tmp_path / "npm.log"
+    (tmp_path / "bin").mkdir()
+    npm = tmp_path / "bin" / "npm"
+    npm.write_text(f'#!/usr/bin/env bash\necho "npm $@" >> {log}\n'); npm.chmod(npm.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:{os.environ['PATH']}")
+    proj = tmp_path / "p"; (proj / "node_modules").mkdir(parents=True)
+    (proj / "package.json").write_text('{"scripts": {"dev": "vite"}}')
+    (proj / "index.html").write_text("<h1>x</h1>"); (proj / "tool.py").write_text("print('py')\n")
+    w = MainWindow(); w.show(); w.set_root(proj)
+    try:
+        w.docs.open(proj / "tool.py"); w.run("buildrun")                              # Python-Datei: läuft selbst, kein npm
+        assert pump(lambda: "py" in w.output.text.toPlainText() and not w.runner.busy, 20)
+        assert not log.exists()
+        w.docs.open(proj / "index.html"); w.run("buildrun")                           # HTML hat keinen Interpreter → Dev-Server des Projekts
+        assert pump(lambda: log.exists() and not w.runner.busy, 20)
+        assert log.read_text().splitlines() == ["npm run dev"]
+        assert "Start-Befehl" in w.output.text.toPlainText()
+    finally:
+        w.docs.close_all(); w.close()

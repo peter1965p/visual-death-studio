@@ -39,6 +39,8 @@ Das Skript legt eine virtuelle Python-Umgebung an, installiert die Abhängigkeit
 (in `~/.local/bin`) und einen Eintrag im Anwendungsmenü. Es braucht Python 3.10+ und keine Administratorrechte; am Ende zeigt es,
 welche optionalen Werkzeuge (Compiler, Debugger, Sprachserver) fehlen. `./install.sh --help` listet die Optionen.
 
+Laravel: `composer create-project laravel/laravel meine-app`, Ordner öffnen, F5 startet `php artisan serve`, die Vorschau öffnet sich selbst. (Für SQLite braucht PHP die Erweiterung `pdo_sqlite`; auf Arch: `php-sqlite`.)
+
 Startbild abschalten: Extras → Optionen → Allgemein oder `--no-splash`.
 
 Entfernen: `./uninstall.sh` (löscht Starter, Menüeintrag und die vom Skript angelegte Umgebung; mit `--purge` auch die Einstellungen,
