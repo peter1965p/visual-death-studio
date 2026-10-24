@@ -35,6 +35,14 @@ class Runner(QObject):
         self._collected = ""
         self._next(0)
 
+    def start_steps(self, steps: list):
+        """Mehrere Schritte [(Befehl, Arbeitsordner)] nacheinander; bei einem Fehler wird abgebrochen."""
+        if self.busy or not steps:
+            return
+        self._steps = [(list(c), Path(w)) for c, w in steps]
+        self._collected = ""
+        self._next(0)
+
     @staticmethod
     def python_for(file: Path) -> str:
         """Interpreter für ein Python-Programm: .venv/venv des Projekts (von der Datei aufwärts gesucht), sonst System-python3."""

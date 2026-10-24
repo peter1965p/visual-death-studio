@@ -3,19 +3,21 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QTimer, Qt
-from PySide6.QtGui import QAction, QFont, QKeySequence, QTextCursor
+from PySide6.QtCore import QSettings, QTimer, QUrl, Qt
+from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
                                QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
 from .build.languages import LANGS, lang_for, parse_problems
+from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
 from .designer import codegen
 from .diff import changes as gitc
 from .diff.view import DiffView
 from .docks.changes import ChangesPanel, DiffRequest
+from .debug import tools as dbg_tools
 from .debug.controller import DebugController
 from .ai.completion import MODELS, AiCompletion
 from .lsp.manager import LspManager
@@ -44,6 +46,7 @@ PIP_NAMES = {"cv2": "opencv-python", "PIL": "pillow", "yaml": "pyyaml", "sklearn
 
 LAYOUT_VERSION = 5   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
 ROOT = Path(__file__).resolve().parent.parent
+REPO_URL = "https://github.com/peter1965p/visual-death-studio"
 SAMPLES = {
     "hello.py": 'def greet(name: str) -> str:\n    return f"Hallo, {name}!"\n\n\nif __name__ == "__main__":\n    print(greet("Visual Death Studio"))\n',
     "hello.c": '#include <stdio.h>\n\nint main(void) {\n    printf("Hallo aus C!\\n");\n    return 0;\n}\n',
@@ -84,6 +87,7 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self.dbg = DebugController(self, dict(locals=self.p_locals, watch=self.p_watch, stack=self.p_stack, immediate=self.p_imm))
         self._after_build = None
+        self._build_base = None            # Basisordner für relative Pfade in Compilermeldungen (Projekt-Build)
         self._lsp_status: dict = {}
         self._start_text = " Starten"
         self._build_actions()
@@ -204,8 +208,17 @@ class MainWindow(QMainWindow):
             quickact=A("Schnelle Aktionen und Refactorings…", self.quick_actions, "Ctrl+."),
             aicomplete=A("Claude-Vervollständigung (Strg+Enter)", self.ai_complete),
             aimodel=A("Claude-Modell für Vervollständigung…", self.pick_ai_model),
-            build=A("Projektmappe erstellen", lambda: self.run("build"), "Ctrl+Shift+B", "build"),
-            clean=A("Projektmappe bereinigen", self.clean),
+            build=A("Projekt erstellen", self.build_project, "Ctrl+Shift+B", "build"),
+            rebuild=A("Projekt neu erstellen", self.rebuild_project, "Ctrl+Alt+F7"),
+            clean=A("Projekt bereinigen", self.clean),
+            cancelbuild=A("Erstellen abbrechen", self.cancel_build, "Ctrl+Pause"),
+            compilefile=A("Aktuelle Datei kompilieren", lambda: self.run("build"), "Ctrl+F7"),
+            newitem=A("Neues Element hinzufügen…", self.explorer.new_file),
+            newfolder=A("Neuer Ordner…", lambda: self.explorer.new_file(True)),
+            additem=A("Vorhandenes Element hinzufügen…", self.add_existing_item),
+            setstartup=A("Als Startdatei festlegen", self.set_startup),
+            projprops=A("Eigenschaften…", self.project_properties, "Alt+Return"),
+            showfolder=A("Projektordner im Dateimanager öffnen", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.root)))),
             start=A("Debugging starten", self.dbg.start, "F5", "play", C["green"]),
             startnd=A("Starten ohne Debugging", lambda: self.run("buildrun"), "Ctrl+F5", "play-outline", C["green"]),
             stop=A("Debugging beenden", self.stop_any, "Shift+F5", "stop", C["red"]),
@@ -229,6 +242,16 @@ class MainWindow(QMainWindow):
             analyze=A("REA: Ordner analysieren", lambda: self.rea_analyze(str(self.root))),
             askclaude=A("Claude fragen", self.ask_claude, "Ctrl+Shift+L"),
             about=A("Info über Visual Death Studio", self.about),
+            gettingstarted=A("Erste Schritte", self.getting_started, "F1"),
+            shortcuts=A("Tastenkürzel…", self.show_shortcuts, "Ctrl+Alt+K"),
+            toolcheck=A("Installierte Werkzeuge prüfen…", self.check_tools),
+            website=A("Quellcode und Dokumentation (GitHub)", lambda: QDesktopServices.openUrl(QUrl(REPO_URL))),
+            reportbug=A("Fehler melden…", lambda: QDesktopServices.openUrl(QUrl(REPO_URL + "/issues/new"))),
+            license=A("Lizenz anzeigen", self.show_license),
+            configdir=A("Konfigurationsordner öffnen", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.settings.fileName()).parent)))),
+            closeall=A("Alle Dokumente schließen", lambda: self.docs.close_all()),
+            nextdoc=A("Nächstes Dokument", lambda: self._cycle_doc(1), "Ctrl+Tab"),
+            prevdoc=A("Vorheriges Dokument", lambda: self._cycle_doc(-1), "Ctrl+Shift+Tab"),
             reset=A("Fensterlayout zurücksetzen", self.reset_layout),
         )
         self.a["stop"].setEnabled(False)
@@ -256,8 +279,9 @@ class MainWindow(QMainWindow):
         v.addAction(a["viewcode"]); v.addAction(a["viewdesigner"])
         v.addSeparator()
         v.addAction(a["reset"])
-        menu("&Projekt", [a["newproject"], a["new"], a["newform"], None, a["analyze"]])
-        menu("&Erstellen", [a["build"], a["clean"]])
+        menu("&Projekt", [a["newproject"], a["newitem"], a["newform"], a["newfolder"], a["additem"], None, a["setstartup"], a["pkgs"], a["analyze"], None,
+                          a["showfolder"], a["projprops"]])
+        menu("&Erstellen", [a["build"], a["rebuild"], a["clean"], a["cancelbuild"], None, a["compilefile"]])
         menu("&Test", [a["testexp"], None, a["testall"], a["testfailed"], a["testdiscover"], a["testcancel"]])
         menu("&Debuggen", [a["start"], a["startnd"], a["dpause"], a["stop"], a["drestart"], None, a["stepin"], a["stepover"], a["stepout"], None, a["togglebp"], a["clearbp"]])
         t = menu("E&xtras", [])
@@ -270,8 +294,8 @@ class MainWindow(QMainWindow):
             t.addAction(x)
         t.addSeparator()
         t.addAction(self._act("Terminal öffnen", lambda: (self.d_terminal.show(), self.d_terminal.raise_())))
-        menu("&Fenster", [a["reset"]])
-        menu("&Hilfe", [a["about"]])
+        menu("&Fenster", [a["nextdoc"], a["prevdoc"], a["closeall"], None, a["reset"]])
+        menu("&Hilfe", [a["gettingstarted"], a["shortcuts"], a["toolcheck"], None, a["website"], a["reportbug"], a["license"], a["configdir"], None, a["about"]])
 
     def _build_toolbar(self):
         tb = QToolBar("Standard", self)
@@ -559,6 +583,7 @@ class MainWindow(QMainWindow):
         if not doc or doc.run_target is None or self.runner.busy:
             return
         self._last_run = (mode, debug)
+        self._build_base = None
         if not _retry:
             self._offered = set()      # pro manuellem Start höchstens ein Installationsangebot je Paket
         self.docs.save_all()
@@ -600,6 +625,9 @@ class MainWindow(QMainWindow):
         a["start"].setText("Weiter" if paused else "Debugging starten")
         a["start"].setEnabled(paused or (not dbg_on and not busy))
         a["startnd"].setEnabled(not dbg_on and not busy)
+        for k in ("build", "rebuild", "clean", "compilefile"):
+            a[k].setEnabled(not dbg_on and not busy)
+        a["cancelbuild"].setEnabled(busy and not dbg_on)
         a["stop"].setEnabled(dbg_on or busy)
         for k in ("dpause", "drestart", "stepin", "stepover", "stepout"):
             a[k].setVisible(dbg_on)
@@ -625,7 +653,8 @@ class MainWindow(QMainWindow):
         kind = "ok" if code == 0 else "stderr"
         self.output.append(f"\nVorgang beendet mit Code {code}.\n", kind)
         cur = self.docs.current_doc()
-        base = cur.run_target.parent if cur and cur.run_target else self.root
+        base = self._build_base or (cur.run_target.parent if cur and cur.run_target else self.root)
+        self._build_base = None
         probs = []
         for sev, msg, f, line, col in parse_problems(text):
             fp = Path(f)
@@ -897,10 +926,109 @@ class MainWindow(QMainWindow):
             if f.exists():
                 self.docs.open(f)
 
-    def clean(self):
+    # --- Erstellen --------------------------------------------------------------------------------
+    def _project_steps(self, steps):
+        """python3 durch den Interpreter des Projekts ersetzen."""
+        py = self.runner.interpreter(self.root / "x.py")
+        return [([py if c[0] == "python3" else c[0]] + list(c[1:]), cwd) for c, cwd in steps]
+
+    def _run_build_steps(self, bs, steps, title):
+        if not steps:
+            return False
+        if bs.missing_tool():
+            self.d_output.show(); self.d_output.raise_()
+            self.output.clear()
+            self.output.append(dbg_tools.missing_message(bs.missing_tool(), f"{bs.name}-Projekte") + "\n", "stderr")
+            return False
+        self.docs.save_all()
+        self.output.clear()
+        self.errors.set_source("build", [])
+        self.d_output.show(); self.d_output.raise_()
+        self.output.append(f"{title} ({bs.name}) …\n", "info")
+        self._build_base = self.root
+        self.runner.start_steps(self._project_steps(steps))
+        return True
+
+    def build_project(self, then=None):
+        """Projekt mit dem erkannten Build-System erstellen; ohne Build-System wird die aktive Datei kompiliert."""
+        if self.runner.busy:
+            return
+        bs = buildsys.detect(self.root, self.project)
+        if bs is None:
+            doc = self.docs.current_doc()
+            if doc and doc.run_target is not None:
+                self._after_build = then
+                return self.run("build")
+            return QMessageBox.information(self, APP_NAME, "Im Projektordner wurde kein Build-System erkannt (CMake, Make, Cargo, Go, .NET, Maven, "
+                                           "Gradle, npm) und es ist keine Datei zum Kompilieren aktiv.\n\nEinen eigenen Befehl legst du unter "
+                                           "Projekt → Eigenschaften fest.")
+        self._after_build = then
+        if not self._run_build_steps(bs, bs.build, "Erstellen"):
+            self._after_build = None
+
+    def rebuild_project(self):
+        if self.runner.busy:
+            return
+        bs = buildsys.detect(self.root, self.project)
+        if bs is None:
+            self.clean(quiet=True)
+            return self.build_project()
+        self._run_build_steps(bs, bs.clean + bs.build, "Neu erstellen")
+
+    def clean(self, quiet=False):
+        if self.runner.busy:
+            return
+        bs = buildsys.detect(self.root, self.project)
+        if bs and bs.clean:
+            return self._run_build_steps(bs, bs.clean, "Bereinigen")
         import shutil
         shutil.rmtree(self.runner.build_dir, ignore_errors=True)
-        self.output.append("Bereinigt.\n", "ok")
+        if not quiet:
+            self.output.append("Bereinigt.\n", "ok")
+
+    def cancel_build(self):
+        if self.runner.busy and not self.dbg.active:
+            self.runner.stop()
+            self.output.append("\nErstellen abgebrochen.\n", "stderr")
+
+    # --- Projekt ----------------------------------------------------------------------------------
+    def add_existing_item(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Vorhandenes Element hinzufügen", str(Path.home()))
+        if not files:
+            return
+        import shutil
+        target = self.explorer._target_dir()
+        added = []
+        for f in files:
+            dst = target / Path(f).name
+            if dst.exists() and QMessageBox.question(self, APP_NAME, f"'{dst.name}' existiert bereits. Überschreiben?") != QMessageBox.Yes:
+                continue
+            shutil.copy2(f, dst); added.append(dst)
+        if added:
+            self.statusBar().showMessage(f"{len(added)} Element(e) in {target.name} hinzugefügt.", 6000)
+            self._open_file(added[0])
+
+    def set_startup(self):
+        d = self.docs.current_doc()
+        target = d.path if d and d.kind in ("code",) else (d.run_target if d and d.run_target else None)
+        if not target:
+            return self.statusBar().showMessage("Zuerst eine Datei öffnen, die als Startdatei dienen soll.", 6000)
+        try:
+            rel = Path(target).resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return QMessageBox.warning(self, APP_NAME, "Die Startdatei muss im Projektordner liegen.")
+        self.project.startup = rel
+        self.project.save(self.root)
+        self.statusBar().showMessage(f"Startdatei: {rel}", 6000)
+
+    def project_properties(self):
+        from .ui.dialogs import ProjectPropertiesDialog
+        dlg = ProjectPropertiesDialog(self.root, self.project, self)
+        if dlg.exec():
+            self.project = dlg.result_settings(self.project)
+            self.runner.project = self.project
+            self.project.save(self.root)
+            self.statusBar().showMessage("Projekteigenschaften gespeichert.", 5000)
 
     def find(self):
         from PySide6.QtWidgets import QInputDialog
@@ -949,7 +1077,35 @@ class MainWindow(QMainWindow):
         self.output.append(analyze_dir(Path(path)), "stdout")
 
     def about(self):
-        QMessageBox.about(self, "Visual Death Studio", "Visual Death Studio – eine Qt-IDE im Stil der klassischen Visual-Studio-Oberfläche.\nPySide6 · Pygments · pyte")
+        import platform
+        import PySide6
+        from . import __version__
+        QMessageBox.about(self, APP_NAME, f"<h3>{APP_NAME} {__version__}</h3>"
+                          "<p>Eine Qt-IDE mit Neon-Oberfläche, Formular-Designer, Debugger, IntelliSense und Claude-Anbindung.</p>"
+                          f"<p>Python {platform.python_version()} · PySide6 {PySide6.__version__}<br>MIT-Lizenz · © 2026 peter1965p</p>"
+                          f"<p><a href='{REPO_URL}'>{REPO_URL}</a></p>")
+
+    def getting_started(self):
+        from .ui.dialogs import GettingStartedDialog
+        GettingStartedDialog(self).exec()
+
+    def show_shortcuts(self):
+        from .ui.dialogs import ShortcutsDialog
+        ShortcutsDialog(self.menuBar(), self).exec()
+
+    def check_tools(self):
+        from .ui.dialogs import ToolCheckDialog
+        ToolCheckDialog(self).exec()
+
+    def show_license(self):
+        from .ui.dialogs import TextDialog
+        lic = ROOT / "LICENSE"
+        TextDialog("Lizenz", lic.read_text(encoding="utf-8") if lic.exists() else "MIT-Lizenz, siehe " + REPO_URL, self).exec()
+
+    def _cycle_doc(self, step):
+        n = self.docs.count()
+        if n:
+            self.docs.setCurrentIndex((self.docs.currentIndex() + step) % n)
 
     def reset_layout(self):
         for d in self.all_docks:
