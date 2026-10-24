@@ -7,10 +7,11 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, Q
 from ..editor.highlighter import PygmentsHighlighter
 from ..theme import EDITOR_FONT
 from . import engine
+from ..theme import t
 
-BG = {"add": "#10372d", "del": "#3b1829", "chg_l": "#3b1829", "chg_r": "#10372d"}
-SPAN = {"l": "#8c2c55", "r": "#1c7a58"}
-FILLER = QBrush(QColor("#1a2040"), Qt.BDiagPattern)
+BG = {k: t(v) for k, v in {"add": "#10372d", "del": "#3b1829", "chg_l": "#3b1829", "chg_r": "#10372d"}.items()}
+SPAN = {k: t(v) for k, v in {"l": "#8c2c55", "r": "#1c7a58"}.items()}
+FILLER = QBrush(QColor(t("#1a2040")), Qt.BDiagPattern)
 HUNK_COLOR = {"add": QColor(115, 201, 145, 70), "del": QColor(241, 76, 76, 70), "chg": QColor(204, 167, 0, 70)}
 
 
@@ -52,8 +53,8 @@ class _Pane(QPlainTextEdit):
 
     def paint_gutter(self, e):
         p = QPainter(self.gutter)
-        p.fillRect(e.rect(), QColor("#080a16"))
-        p.setPen(QColor("#4d5b82"))
+        p.fillRect(e.rect(), QColor(t("#080a16")))
+        p.setPen(QColor(t("#4d5b82")))
         block = self.firstVisibleBlock()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         while block.isValid() and top <= e.rect().bottom():
@@ -108,7 +109,7 @@ class _HunkBar(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#0c0f22"))
+        p.fillRect(self.rect(), QColor(t("#0c0f22")))
         self.buttons = []
         v = self.v
         for h in v.hunks:
@@ -121,7 +122,7 @@ class _HunkBar(QWidget):
             kind = "add" if h.a1 == h.a2 else "del" if h.b1 == h.b2 else "chg"
             p.fillRect(QRect(0, int(y1), self.width(), max(2, int(y2 - y1))), HUNK_COLOR[kind])
             if h.index == v.current:
-                p.setPen(QColor("#00e5ff")); p.drawRect(0, int(y1), self.width() - 1, max(2, int(y2 - y1)) - 1)
+                p.setPen(QColor(t("#00e5ff"))); p.drawRect(0, int(y1), self.width() - 1, max(2, int(y2 - y1)) - 1)
             ops = []
             if v.right_apply:
                 ops.append(("right", "↩" if not v.left_apply else "▶"))
@@ -130,8 +131,8 @@ class _HunkBar(QWidget):
             x = 4
             for op, glyph in ops:
                 r = QRect(x, int(y1) + 1, 20, 18)
-                p.setPen(QColor("#2a3a6a")); p.setBrush(QColor("#161b3a")); p.drawRoundedRect(r, 3, 3)
-                p.setPen(QColor("#dbe6ff")); p.drawText(r, Qt.AlignCenter, glyph)
+                p.setPen(QColor(t("#2a3a6a"))); p.setBrush(QColor(t("#161b3a"))); p.drawRoundedRect(r, 3, 3)
+                p.setPen(QColor(t("#dbe6ff"))); p.drawText(r, Qt.AlignCenter, glyph)
                 self.buttons.append((r, h.index, op))
                 x += 22
         p.end()
@@ -207,7 +208,7 @@ class DiffView(QWidget):
     def refresh(self):
         self.rows, self.hunks = engine.diff(self.left_t.lines, self.right_t.lines, self.ignore_ws)
         add, rem = engine.stats(self.rows)
-        self.stats.setText(f"<span style='color:#3dffa1'>+{add}</span>  <span style='color:#ff4d6d'>−{rem}</span>"
+        self.stats.setText(t(f"<span style='color:#3dffa1'>+{add}</span>  <span style='color:#ff4d6d'>−{rem}</span>")
                            if self.hunks else "Keine Unterschiede")
         self.stats.setTextFormat(Qt.RichText)
         self.b_prev.setEnabled(bool(self.hunks)); self.b_next.setEnabled(bool(self.hunks))

@@ -80,6 +80,11 @@ class OptionsDialog(QDialog):
     def _page_general(self):
         w = QWidget(); lay = QVBoxLayout(w)
         lay.addWidget(note("Alle Optionen gelten sofort für das ganze Programm. Gespeichert wird im Konfigurationsordner des Benutzers."))
+        theme = self._combo("ui/theme", {"neon": "Neon (dunkel)", "hell": "Hell"})
+        self.theme_note = QLabel(); self.theme_note.setWordWrap(True); self.theme_note.setStyleSheet("color:#8fa3c7")
+        self.restart_btn = QPushButton("Jetzt neu starten"); self.restart_btn.setFixedWidth(180); self.restart_btn.clicked.connect(self._restart)
+        tf = QFormLayout(); tf.addRow("Farbschema", theme); lay.addLayout(tf); lay.addWidget(self.theme_note); lay.addWidget(self.restart_btn)
+        theme.currentIndexChanged.connect(self._theme_hint); self._theme_hint()
         lay.addWidget(self._bool("ui/splash", "Startbild mit Fortschrittsanzeige zeigen (beim nächsten Start)"))
         for text, slot in (("Fensterlayout zurücksetzen", self._reset_layout), ("Konfigurationsordner öffnen", self._open_config),
                            ("Einstellungen exportieren …", self._export), ("Einstellungen importieren …", self._import)):
@@ -230,6 +235,21 @@ class OptionsDialog(QDialog):
         self.test_btn.setEnabled(True)
         self.test_out.setText(("✔ " if ok else "✘ ") + msg)
         self.test_out.setStyleSheet("color:#3dffa1" if ok else "color:#ff7a93")
+
+    def _theme_hint(self, *_):
+        from .. import theme as th
+        chosen = self.fields["ui/theme"][1]()
+        differs = chosen != th.current
+        self.theme_note.setText("Das neue Farbschema wird nach einem Neustart vollständig angewendet." if differs else "")
+        self.restart_btn.setVisible(differs)
+
+    def _restart(self):
+        self.apply()
+        import sys
+        from PySide6.QtCore import QProcess
+        from PySide6.QtWidgets import QApplication
+        if QProcess.startDetached(sys.executable, sys.argv):
+            QApplication.quit()
 
     def _reset_layout(self):
         if self.win:

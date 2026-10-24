@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("VDS_THEME", "neon")                                              # Tests laufen immer im Standard-Schema
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-gpu")      # QtWebEngine im Offscreen-Test
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

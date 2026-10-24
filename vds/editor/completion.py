@@ -4,11 +4,13 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QListWidgetItem, QStyledItemDelegate, QVBoxLayout
 
 from ..lsp.ranking import KIND_NAME
+from ..theme import t
 
 CHIP = {"function": ("ƒ", "#c792ff"), "method": ("ƒ", "#c792ff"), "constructor": ("ƒ", "#c792ff"), "variable": ("v", "#5ee7ff"),
         "field": ("f", "#5ee7ff"), "property": ("p", "#5ee7ff"), "class": ("C", "#ffc474"), "struct": ("S", "#ffc474"), "interface": ("I", "#ffc474"),
         "module": ("M", "#ff7ac6"), "keyword": ("k", "#8fa3c7"), "constant": ("c", "#3dffa1"), "enum": ("E", "#3dffa1"), "enummember": ("e", "#3dffa1"),
         "snippet": ("s", "#8fa3c7"), "text": ("w", "#6f7fa6")}
+CHIP = {k: (g, t(c)) for k, (g, c) in CHIP.items()}
 ROW_H = 26
 MAX_ROWS = 10
 
@@ -39,12 +41,12 @@ class _Delegate(QStyledItemDelegate):
         fm, fmb = QFontMetrics(f2), QFontMetrics(fb)
         for i, ch in enumerate(label):
             hit = i in pos
-            p.setFont(fb if hit else f2); p.setPen(QColor("#00e5ff") if hit else QColor("#dbe6ff" if not it.get("deprecated") else "#6f7fa6"))
+            p.setFont(fb if hit else f2); p.setPen(QColor(t("#00e5ff")) if hit else QColor(t("#dbe6ff" if not it.get("deprecated") else "#6f7fa6")))
             p.drawText(int(x), r.y() + 18, ch)
             x += (fmb if hit else fm).horizontalAdvance(ch)
         detail = it.get("detail") or ""
         if detail:
-            p.setFont(f2); p.setPen(QColor("#6f7fa6"))
+            p.setFont(f2); p.setPen(QColor(t("#6f7fa6")))
             w = r.right() - x - 20
             if w > 40:
                 p.drawText(QRectF(x + 14, r.y(), r.right() - x - 22, r.height()), Qt.AlignVCenter | Qt.AlignRight, fm.elidedText(detail, Qt.ElideRight, int(w - 10)))
@@ -58,9 +60,9 @@ class CompletionPopup(QFrame):
         super().__init__(editor, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setStyleSheet("QFrame#cp { background: #0c0f22; border: 1px solid rgba(0,229,255,0.55); border-radius: 10px; }"
+        self.setStyleSheet(t("QFrame#cp { background: #0c0f22; border: 1px solid rgba(0,229,255,0.55); border-radius: 10px; }"
                            "QListWidget { background: transparent; border: none; outline: 0; }"
-                           "QLabel#doc { color: #9fb3d9; padding: 6px 12px; border-top: 1px solid rgba(0,229,255,0.18); }")
+                           "QLabel#doc { color: #9fb3d9; padding: 6px 12px; border-top: 1px solid rgba(0,229,255,0.18); }"))
         self.setObjectName("cp")
         self.list = QListWidget(); self.list.setItemDelegate(_Delegate(self.list)); self.list.setFocusPolicy(Qt.NoFocus)
         self.list.setVerticalScrollMode(QListWidget.ScrollPerItem)
@@ -117,7 +119,7 @@ class SignatureTip(QLabel):
         super().__init__(editor, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setTextFormat(Qt.RichText)
-        self.setStyleSheet("QLabel { background: #0c0f22; color: #dbe6ff; border: 1px solid rgba(180,76,255,0.7); border-radius: 8px; padding: 6px 10px; }")
+        self.setStyleSheet(t("QLabel { background: #0c0f22; color: #dbe6ff; border: 1px solid rgba(180,76,255,0.7); border-radius: 8px; padding: 6px 10px; }"))
         self.setFont(editor.font())
 
     def show_sig(self, sig: dict, pos):
@@ -128,7 +130,7 @@ class SignatureTip(QLabel):
         else:
             body = html.escape(label)
         doc = f"<br><span style='color:#8fa3c7'>{html.escape(sig['doc'])}</span>" if sig.get("doc") else ""
-        self.setText(body + doc)
+        self.setText(t(body + doc))
         self.adjustSize()
         self.move(pos)
         self.show()
@@ -143,10 +145,10 @@ class SuggestionCard(QFrame):
         from .highlighter import PygmentsHighlighter
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setObjectName("sc")
-        self.setStyleSheet("QFrame#sc { background: #0c0f22; border: 1px solid rgba(180,76,255,0.85); border-radius: 10px; }"
+        self.setStyleSheet(t("QFrame#sc { background: #0c0f22; border: 1px solid rgba(180,76,255,0.85); border-radius: 10px; }"
                            "QLabel#hd { color: #c792ff; padding: 6px 12px 4px 12px; letter-spacing: 1px; }"
                            "QLabel#ft { color: #6f7fa6; padding: 2px 12px 6px 12px; }"
-                           "QPlainTextEdit { background: transparent; border: none; color: #dbe6ff; }")
+                           "QPlainTextEdit { background: transparent; border: none; color: #dbe6ff; }"))
         self.head, self.foot = QLabel(), QLabel()
         self.head.setObjectName("hd"); self.foot.setObjectName("ft")
         self.body = QPlainTextEdit(); self.body.setReadOnly(True); self.body.setFont(editor.font()); self.body.setLineWrapMode(QPlainTextEdit.NoWrap)

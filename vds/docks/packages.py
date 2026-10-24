@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineE
                                QPlainTextEdit, QPushButton, QSplitter, QTabBar, QVBoxLayout, QWidget)
 
 from ..packages.sources import SOURCES, Pkg, is_pre, vkey
+from ..theme import t
 
 
 class _Signals(QObject):
@@ -54,7 +55,7 @@ class PackagePanel(QWidget):
         self.title, self.meta, self.desc = QLabel(), QLabel(), QLabel()
         self.title.setStyleSheet("font-size:15px;font-weight:600"); self.meta.setObjectName("sub")
         self.desc.setWordWrap(True); self.desc.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.link = QLabel(); self.link.setStyleSheet("color:#5ee7ff"); self.link.setCursor(Qt.PointingHandCursor)
+        self.link = QLabel(); self.link.setStyleSheet(t("color:#5ee7ff")); self.link.setCursor(Qt.PointingHandCursor)
         self.version = QComboBox()
         self.b_install, self.b_remove = QPushButton("Installieren"), QPushButton("Deinstallieren")
         self.b_install.setObjectName("primary")
@@ -166,7 +167,7 @@ class PackagePanel(QWidget):
                                  + (f"\n{p.description[:110]}" if p.description else ""))
             it.setData(Qt.UserRole, p)
             if inst:
-                it.setForeground(QColor("#3dffa1"))
+                it.setForeground(QColor(t("#3dffa1")))
             self.list.addItem(it)
         self.status.setText(msg or f"{len(pkgs)} Paket(e)")
         if pkgs:
@@ -305,4 +306,4 @@ class PackagePanel(QWidget):
         else:
             for i in range(self.list.count()):
                 p = self.list.item(i).data(Qt.UserRole)
-                self.list.item(i).setForeground(QColor("#3dffa1") if p.id.lower() in self.installed else QColor("#dbe6ff"))
+                self.list.item(i).setForeground(QColor(t("#3dffa1")) if p.id.lower() in self.installed else QColor(t("#dbe6ff")))

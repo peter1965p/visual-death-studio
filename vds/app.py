@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
                 d.setProperty("active", active)
                 d.style().unpolish(d); d.style().polish(d)
 
-    def _act(self, text, slot, shortcut=None, ico=None, color="#c8d6f5"):
+    def _act(self, text, slot, shortcut=None, ico=None, color=None):
         a = QAction(icon(ico, color) if ico else QAction().icon(), text, self)
         if shortcut:
             a.setShortcut(QKeySequence(shortcut))

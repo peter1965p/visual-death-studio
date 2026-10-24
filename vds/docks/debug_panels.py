@@ -4,12 +4,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (QHeaderView, QLineEdit, QMenu, QPlainTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from ..theme import t
 
 REF = Qt.UserRole
 LOADED = Qt.UserRole + 1
-CHANGED = QColor("#ff7a93")
-DIM = QColor("#8fa3c7")
-ERR = QColor("#ff4d6d")
+CHANGED = QColor(t("#ff7a93"))
+DIM = QColor(t("#8fa3c7"))
+ERR = QColor(t("#ff4d6d"))
 LOCAL_SCOPES = ("locals", "arguments", "lokal", "args", "local")
 NOISE = ("special variables", "function variables", "class variables")   # technische Gruppen von debugpy ausblenden
 
@@ -173,7 +174,7 @@ class WatchPanel(QWidget):
                 if gen != self._gen:
                     return
                 item.setText(1, result); item.setText(2, typ); item.setToolTip(1, result)
-                item.setForeground(1, QBrush(QColor("#dbe6ff") if ok else ERR))
+                item.setForeground(1, QBrush(QColor(t("#dbe6ff")) if ok else ERR))
                 if ok and ref > 0:
                     item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator); item.setData(0, REF, ref)
             session.evaluate(e, got, "watch")
@@ -216,7 +217,7 @@ class CallStackPanel(QTreeWidget):
             it = QTreeWidgetItem(self, ["➜" if i == sel else "", f.name, where])
             it.setToolTip(2, f.path or "")
             if i == sel:
-                it.setForeground(0, QBrush(QColor("#ffd60a")))
+                it.setForeground(0, QBrush(QColor(t("#ffd60a"))))
                 font = QFont(it.font(1)); font.setBold(True)
                 it.setFont(1, font); it.setFont(2, font)
             elif not f.path:
@@ -242,7 +243,7 @@ class ImmediatePanel(QWidget):
     def line(self, text, color=None):
         from PySide6.QtGui import QTextCharFormat
         fmt = QTextCharFormat()
-        fmt.setForeground(color or QColor("#dbe6ff"))
+        fmt.setForeground(color or QColor(t("#dbe6ff")))
         c = self.out.textCursor(); c.movePosition(c.MoveOperation.End); c.insertText(text + "\n", fmt)
         self.out.setTextCursor(c); self.out.ensureCursorVisible()
 
@@ -250,7 +251,7 @@ class ImmediatePanel(QWidget):
         t = self.edit.text().strip()
         if t:
             self.history.append(t); self.hpos = len(self.history)
-            self.line("> " + t, QColor("#5ee7ff"))
+            self.line("> " + t, QColor(t("#5ee7ff")))
             self.submitted.emit(t)
         self.edit.clear()
 

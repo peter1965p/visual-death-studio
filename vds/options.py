@@ -15,12 +15,12 @@ DEFAULTS = {
     "claude/provider": "cli",
     "claude/api_model": "claude-opus-5-5", "claude/api_completion_model": "claude-haiku-5-5", "claude/api_base_url": "",
     "claude/api_max_tokens": 32000, "claude/api_effort": "", "claude/api_fallbacks": True,
-    "ui/splash": True,
+    "ui/splash": True, "ui/theme": "neon",
     # Web-Vorschau
     "web/auto_open": True, "web/auto_reload": "ohne-hmr", "web/device": "Frei (füllt das Fenster)",
     "ai/completion_model": "haiku",                 # Modell der Claude-CLI für die Vervollständigung
 }
-CHOICES = {"claude/provider": ("cli", "api"), "web/auto_reload": ("nie", "ohne-hmr", "immer"), "claude/api_effort": ("", "low", "medium", "high", "xhigh", "max")}
+CHOICES = {"ui/theme": ("neon", "hell"), "claude/provider": ("cli", "api"), "web/auto_reload": ("nie", "ohne-hmr", "immer"), "claude/api_effort": ("", "low", "medium", "high", "xhigh", "max")}
 LIMITS = {"editor/tab_width": (1, 16), "editor/autosave_seconds": (0, 3600), "intellisense/min_chars": (1, 6), "intellisense/delay_ms": (0, 2000),
           "designer/grid": (2, 64), "claude/api_max_tokens": (256, 128000)}
 

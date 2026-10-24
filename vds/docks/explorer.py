@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QFileSystemModel, QInputDialog, QMenu, QMessageBox
 
 from ..build.languages import lang_for
 from ..icons import icon
+from ..theme import t
 
 LANG_COLOR = {"python": "#4b8bbe", "javascript": "#e8d44d", "typescript": "#3178c6", "c": "#6a9bd3", "cpp": "#6a9bd3",
               "csharp": "#68b723", "rust": "#dea584", "go": "#00add8", "java": "#e76f00", "shell": "#89e051", "php": "#8892bf", "vue": "#42b883"}
@@ -19,7 +20,7 @@ class _Model(QFileSystemModel):
             if self.isDir(index):
                 return icon("folder", "#ffc474")
             lang = lang_for(self.filePath(index))
-            return icon("file", LANG_COLOR.get(lang.id, "#c8d6f5") if lang else "#c8d6f5")
+            return icon("file", LANG_COLOR.get(lang.id) if lang else None)
         return super().data(index, role)
 
 

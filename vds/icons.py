@@ -5,7 +5,9 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygo
 _cache: dict = {}
 
 
-def icon(name: str, color: str = "#c8d6f5", size: int = 16) -> QIcon:
+def icon(name: str, color: str | None = None, size: int = 16) -> QIcon:
+    from .theme import C, adapt
+    color = adapt(color) if color else C["icon"]
     key = (name, color, size)
     if key not in _cache:
         pm = QPixmap(size, size)
@@ -95,7 +97,8 @@ def control_icon(kind: str, size: int = 16) -> QIcon:
     if key not in _cache:
         pm = QPixmap(size, size); pm.fill(Qt.transparent)
         p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing)
-        col = QColor("#c8d6f5"); acc = QColor("#00e5ff"); s = size
+        from .theme import C
+        col = QColor(C["icon"]); acc = QColor(C["cyan"]); s = size
         p.setPen(QPen(col, 1.2)); p.setBrush(Qt.NoBrush)
         box = QRectF(1.5, 4, s - 3, s - 8)
         if kind == "Button":

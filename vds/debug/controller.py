@@ -9,6 +9,7 @@ from ..build.languages import lang_for
 from ..build.runner import Runner
 from .session import Bp, DebugSession, csharp_spec, go_spec, java_spec, native_spec, node_spec, python_module_spec, python_spec
 from .tools import find, missing_message
+from ..theme import t
 
 
 class DebugController(QObject):
@@ -247,8 +248,8 @@ class DebugController(QObject):
     def _immediate(self, expr):
         s = self.session
         if not s or s.state != "paused":
-            return self.immediate.line("(nur im angehaltenen Zustand möglich)", QColor("#ffc474"))
-        s.evaluate(expr, lambda ok, result, typ, ref: self.immediate.line(result if ok else f"Fehler: {result}", QColor("#dbe6ff") if ok else QColor("#ff4d6d")), "repl")
+            return self.immediate.line("(nur im angehaltenen Zustand möglich)", QColor(t("#ffc474")))
+        s.evaluate(expr, lambda ok, result, typ, ref: self.immediate.line(result if ok else f"Fehler: {result}", QColor(t("#dbe6ff")) if ok else QColor(t("#ff4d6d"))), "repl")
 
     def datatip(self, expr: str, cb):
         """Wert eines Ausdrucks beim Überfahren im Editor (nur im angehaltenen Zustand)."""
@@ -257,8 +258,8 @@ class DebugController(QObject):
             return cb(None)
         import html
         s.evaluate(expr, lambda ok, res, typ, ref: cb(
-            f"<b>{html.escape(expr)}</b> = <span style='color:#ffc474'>{html.escape(res)}</span>"
-            + (f" <span style='color:#8fa3c7'>({html.escape(typ)})</span>" if typ else "") if ok else None), "hover")
+            t(f"<b>{html.escape(expr)}</b> = <span style='color:#ffc474'>{html.escape(res)}</span>"
+              + (f" <span style='color:#8fa3c7'>({html.escape(typ)})</span>" if typ else "")) if ok else None), "hover")
 
     # --- Haltepunkte -----------------------------------------------------------------------------------------------
     def _collect(self) -> dict:

@@ -12,12 +12,15 @@ from PySide6.QtCore import QEvent, QSocketNotifier, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import QWidget
 
-from ..theme import EDITOR_FONT
+from ..theme import C, EDITOR_FONT, adapt, is_light
 
 NAMED = {"black": "#0a0d1f", "red": "#ff4d6d", "green": "#3dffa1", "brown": "#ffc474", "blue": "#4dd2ff",
          "magenta": "#c792ff", "cyan": "#5ee7ff", "white": "#dbe6ff", "default": None,
          "brightblack": "#4d5b82", "brightred": "#ff7a93", "brightgreen": "#7dffc0", "brightbrown": "#ffe09a",
          "brightblue": "#7cdcff", "brightmagenta": "#dcb0ff", "brightcyan": "#9af0ff", "brightwhite": "#ffffff"}
+if is_light():                                       # ANSI-Farben für hellen Grund: dunkler, Schwarz/Weiß vertauscht
+    NAMED = {k: (adapt(v) if v else v) for k, v in NAMED.items()}
+    NAMED.update(black="#1b2340", white="#4a5378", brightblack="#7b86a8", brightwhite="#1b2340")
 KEYS = {Qt.Key_Return: b"\r", Qt.Key_Enter: b"\r", Qt.Key_Backspace: b"\x7f", Qt.Key_Tab: b"\t", Qt.Key_Escape: b"\x1b",
         Qt.Key_Up: b"\x1b[A", Qt.Key_Down: b"\x1b[B", Qt.Key_Right: b"\x1b[C", Qt.Key_Left: b"\x1b[D",
         Qt.Key_Home: b"\x1b[H", Qt.Key_End: b"\x1b[F", Qt.Key_Delete: b"\x1b[3~", Qt.Key_PageUp: b"\x1b[5~", Qt.Key_PageDown: b"\x1b[6~"}
@@ -42,7 +45,7 @@ class TerminalWidget(QWidget):
         self.stream = pyte.ByteStream(self.screen)
         self.proc = None
         self.master = -1
-        self._fg, self._bg = QColor("#dbe6ff"), QColor("#080a16")
+        self._fg, self._bg = QColor(C["fg"]), QColor(C["editor"])
         self.cursor_on = True
         t = QTimer(self, interval=530); t.timeout.connect(self._blink); t.start()
 

@@ -41,6 +41,8 @@ welche optionalen Werkzeuge (Compiler, Debugger, Sprachserver) fehlen. `./instal
 
 Laravel: `composer create-project laravel/laravel meine-app`, Ordner öffnen, F5 startet `php artisan serve`, die Vorschau öffnet sich selbst. (Für SQLite braucht PHP die Erweiterung `pdo_sqlite`; auf Arch: `php-sqlite`.)
 
+Farbschema: Extras → Optionen → Allgemein (Neon dunkel oder Hell, wirkt nach einem Neustart).
+
 Startbild abschalten: Extras → Optionen → Allgemein oder `--no-splash`.
 
 Entfernen: `./uninstall.sh` (löscht Starter, Menüeintrag und die vom Skript angelegte Umgebung; mit `--purge` auch die Einstellungen,

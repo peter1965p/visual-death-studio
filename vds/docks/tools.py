@@ -10,6 +10,7 @@ from ..build.languages import BY_ID, LANGS, lang_for
 from ..designer.canvas import MIME
 from ..designer.controls import CATEGORIES, SPECS
 from ..icons import control_icon
+from ..theme import t
 
 CTRL_ROLE = Qt.UserRole + 1
 
@@ -133,7 +134,7 @@ class Toolbox(QWidget):
         if self.target:
             from ..designer import targets
             if not targets.supports({"target": self.target}, spec.type):
-                it.setForeground(0, QBrush(QColor("#4d5b82")))
+                it.setForeground(0, QBrush(QColor(t("#4d5b82"))))
                 it.setToolTip(0, f"{spec.type}: für {targets.LABELS[self.target]} nicht verfügbar – wird beim Erzeugen übersprungen")
 
     @staticmethod
