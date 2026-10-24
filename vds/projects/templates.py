@@ -110,6 +110,9 @@ MAUI_FILES = {
 TEMPLATES = [
     Template("claude", "Mit Claude erstellen", "Beschreibe dein Projekt in eigenen Worten – Claude legt Struktur und Code an.",
              "Beliebig", "claude", "KI", {}, "", ("git",)),
+    Template("app", "Fertige Anwendung (CMS, Online-Shop, Website, Dateimanager, Browser …)",
+             "Wähle eine Anwendung und die Technik dazu (Laravel, Angular, React, Vue, Next, Nuxt, Spring Boot, Qt, Swing) – Claude baut sie auf dem Grundgerüst auf.",
+             "Beliebig", "claude", "Anwendung", {}, "", ("git", "readme")),
     Template("py-console", "Python-Konsolenanwendung", "Ein Python-Programm, das in der Konsole läuft.",
              "Python", "python", "Konsole", {"main.py": PY_CONSOLE, "requirements.txt": ""}, "main.py", ("git", "readme", "venv")),
     Template("py-qt", "Python-Fensteranwendung (Qt, mit Formular-Designer)",

@@ -11,6 +11,7 @@ SYSTEM_PROJECT = (
     "Beende deine Antwort mit einer kurzen deutschen Zusammenfassung (was wurde angelegt, wie startet man es) und als "
     "allerletzte Zeile exakt: MAIN: <relativer Pfad der Hauptdatei>"
 )
+SYSTEM_APP = SYSTEM_PROJECT.replace("Erstelle kleine, sofort lauffähige Projekte mit sinnvoller Struktur", "Baue eine vollständige, sofort lauffähige Anwendung mit sauberer Struktur")
 SYSTEM_CHAT = (
     "Du bist der eingebaute Assistent der IDE Visual Death Studio. Das Arbeitsverzeichnis ist das geöffnete Projekt. "
     "Antworte knapp auf Deutsch. Ändere Dateien direkt mit deinen Werkzeugen, statt Code nur im Chat zu zeigen, "

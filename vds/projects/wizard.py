@@ -12,9 +12,10 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
 from ..ai import backend
 from ..theme import t as tc
 from ..branding import SETTINGS_APP, SETTINGS_ORG
-from ..ai.prompts import LANG_HINTS, SYSTEM_PROJECT, parse_main, project_prompt
+from ..ai.prompts import LANG_HINTS, SYSTEM_APP, SYSTEM_PROJECT, parse_main, project_prompt
 from ..docks.explorer import LANG_COLOR
-from .templates import TEMPLATES, Template, create_project, finish_project, scaffold_command, scaffold_failed
+from . import apps
+from .templates import BY_ID, TEMPLATES, Template, create_project, finish_project, scaffold_command, scaffold_failed
 
 COLORS = {**LANG_COLOR, "claude": "#d97757"}
 ABBR = {"claude": "✦", "typescript": "TS", "vue": "Vu", "php": "PHP", "python": "Py", "c": "C", "cpp": "C++", "csharp": "C#", "rust": "Rs", "go": "Go", "javascript": "JS", "java": "Jv", "shell": "sh", "": "＋"}
@@ -203,6 +204,13 @@ class NewProjectDialog(QDialog):
         t = QLabel("Zusätzliche Informationen"); t.setObjectName("title"); lay.addWidget(t)
         self.opt_tpl = QLabel(); self.opt_tpl.setObjectName("sub"); lay.addWidget(self.opt_tpl)
         lay.addSpacing(16)
+        self.app_box = QWidget(); af = QFormLayout(self.app_box); af.setContentsMargins(0, 0, 0, 0); af.setLabelAlignment(Qt.AlignRight)
+        self.app = QComboBox(); self.tech = QComboBox()
+        self.app_info = QLabel(); self.app_info.setObjectName("sub")
+        af.addRow("Anwendung", self.app); af.addRow("Technik", self.tech); af.addRow("", self.app_info)
+        lay.addWidget(self.app_box)
+        self.app.currentIndexChanged.connect(self._app_changed); self.tech.currentIndexChanged.connect(self._tech_changed)
+        self._auto_desc = ""
         self.checks = {k: QCheckBox(v) for k, v in OPTION_LABELS.items()}
         for c in self.checks.values():
             lay.addWidget(c)
@@ -223,9 +231,45 @@ class NewProjectDialog(QDialog):
     def _is_ai(self):
         return self.tpl is not None and self.tpl.id == "claude"
 
+    def _is_app(self):
+        return self.tpl is not None and self.tpl.id == "app"
+
+    @property
+    def eff(self) -> Template:
+        """Vorlage, die tatsächlich angelegt wird: bei „Fertige Anwendung“ das Grundgerüst der gewählten Technik."""
+        if self._is_app() and self.tech.currentData():
+            return BY_ID[self.tech.currentData()]
+        return self.tpl
+
+    def _app_changed(self, *_):
+        a = apps.BY_ID.get(self.app.currentData() or "")
+        if not a:
+            return
+        prev = self.tech.currentData()
+        self.tech.blockSignals(True); self.tech.clear()
+        for tid in a.techs:
+            self.tech.addItem(apps.TECH_LABEL[tid], tid)
+        self.tech.setCurrentIndex(max(0, self.tech.findData(prev)))
+        self.tech.blockSignals(False)
+        self.app_info.setText(a.blurb)
+        self._tech_changed()
+
+    def _tech_changed(self, *_):
+        if not (self._is_app() and self.app.currentData() and self.tech.currentData()):
+            return
+        eff = self.eff
+        for k, c in self.checks.items():
+            c.setVisible(k in eff.options)
+        self.opt_tpl.setText(f"{self.tpl.name}   ·   {eff.name}")
+        self.tools.setText(self._tool_hint())
+        text = apps.prompt(self.app.currentData(), self.tech.currentData())
+        if self.desc.toPlainText().strip() in ("", self._auto_desc):          # selbst geänderten Auftrag nicht überschreiben
+            self.desc.setPlainText(text)
+        self._auto_desc = text.strip()
+
     def _check_desc(self):
         if self.stack.currentIndex() == 2:
-            need = self._is_ai()
+            need = self._is_ai() or self._is_app()
             self.next.setEnabled(not need or (backend.available() and len(self.desc.toPlainText().strip()) >= 10))
 
     # --- Seite 4: Claude arbeitet -------------------------------------------------------------
@@ -248,39 +292,51 @@ class NewProjectDialog(QDialog):
             self._validate()
         elif i == 2:
             self.opt_tpl.setText(f"{self.tpl.name}   ·   {self.tpl.lang}")
+            app = self._is_app()
+            self.app_box.setVisible(app)
+            if not app and self._auto_desc and self.desc.toPlainText().strip() == self._auto_desc:
+                self.desc.clear()                                       # vorbelegter Auftrag einer anderen Vorlage gehört nicht hierher
+                self._auto_desc = ""
+            if app and not self.app.count():
+                for a in apps.APPS:
+                    self.app.addItem(a.name, a.id)                      # löst _app_changed aus und füllt Technik und Beschreibung
             for k, c in self.checks.items():
-                c.setVisible(k in self.tpl.options); c.setChecked(k in ("git", "readme", "essentials"))
+                c.setVisible(k in self.eff.options); c.setChecked(k in ("git", "readme", "essentials"))
+            if app:
+                self._tech_changed()
             self.tools.setText(self._tool_hint())
             ai, have = self._is_ai(), backend.available()
             self.lang_combo.setVisible(ai); self.lang_combo.setCurrentIndex(0)
-            self.desc_label.setText("Beschreibe dein Projekt:" if ai else "Claude passt das Projekt nach deiner Beschreibung an (optional):")
+            self.desc_label.setText("Beschreibe dein Projekt:" if ai else "Auftrag an Claude (vorbelegt – du kannst ihn anpassen):" if app
+                                    else "Claude passt das Projekt nach deiner Beschreibung an (optional):")
             self.desc.setEnabled(have)
             self.ai_hint.setText(
                 "Claude legt Dateien nur in diesem Projektordner an und hat keine Shell. Deine Beschreibung geht über "
                 + ("deinen API-Schlüssel" if backend.provider() == "api" else "deine Claude-Code-Anmeldung") + " an Anthropic; die Nutzung wird abgerechnet bzw. zählt wie normale Claude-Nutzung."
                 if have else backend.unavailable_message().replace("**", "") + " (Projekt-Assistent: Extras → Optionen ist auch ohne Projekt erreichbar.)")
             self._check_desc()
-            if not ai:
+            if not (ai or app):
                 self.next.setEnabled(True)
         else:
             self.next.setEnabled(self.tpl is not None)
 
     def _tool_hint(self):
-        if self.tpl.scaffold:
-            missing = [x for x in (self.tpl.scaffold[0], "php") if not shutil.which(x)]
+        tpl = self.eff
+        if tpl.scaffold:
+            missing = [x for x in (tpl.scaffold[0], "php") if not shutil.which(x)]
             if missing:
                 return f"Hinweis: {', '.join(missing)} ist nicht installiert – das Projekt kann so nicht angelegt werden."
             sqlite = "" if _php_has("pdo_sqlite") else (" Hinweis: Laravel nutzt standardmäßig SQLite – dafür fehlt PHP die Erweiterung pdo_sqlite "
                                                          "(Arch: php-sqlite installieren und in php.ini aktivieren); Seiten ohne Datenbank laufen auch so.")
             return "Das Projekt wird mit „composer create-project“ aus dem Netz geladen." + sqlite
         need = {"python": "python3", "c": "gcc", "cpp": "g++", "csharp": "dotnet", "rust": "rustc", "go": "go", "javascript": "node",
-                "java": "java", "shell": "bash"}.get(self.tpl.lang_id)
+                "java": "java", "shell": "bash"}.get(tpl.lang_id)
         if need and not shutil.which(need):
             return f"Hinweis: '{need}' ist auf diesem System nicht installiert – das Projekt wird erstellt, lässt sich aber erst nach der Installation ausführen."
-        if self.tpl.id == "cs-maui-gtk":
+        if tpl.id == "cs-maui-gtk":
             return ("Hinweis: Das GTK4-Backend ist eine frühe Vorschau (dotnet/maui-labs, MIT). Benötigt gtk4 und libadwaita auf dem System; "
                     "die NuGet-Pakete werden beim ersten Start geladen.")
-        if self.tpl.id == "cs-maui":
+        if tpl.id == "cs-maui":
             return ("Hinweis: MAUI braucht 'dotnet workload install maui-android' (und für Android das Android-SDK). Auf dem Linux-Desktop gibt es nur ein experimentelles GTK4-Backend (Vorschau) – "
                     "Ziele sind Android, iOS, Windows und macOS. Das Projekt wird trotzdem angelegt.")
         return ""
@@ -297,13 +353,14 @@ class NewProjectDialog(QDialog):
             self.accept()
 
     def _create(self):
-        opts = {k: c.isChecked() for k, c in self.checks.items() if k in self.tpl.options}
+        tpl = self.eff
+        opts = {k: c.isChecked() for k, c in self.checks.items() if k in tpl.options}
         loc = Path(self.location.text().strip()).expanduser()
-        if self.tpl.scaffold:
+        if tpl.scaffold:
             return self._start_scaffold(loc, opts)
         self.setCursor(Qt.WaitCursor)
         try:
-            self.result_data = create_project(self.tpl, self.name.text().strip(), loc, opts)
+            self.result_data = create_project(tpl, self.name.text().strip(), loc, opts)
         except Exception as e:  # Dateisystem-/Prozessfehler dem Nutzer zeigen
             self.setCursor(Qt.ArrowCursor)
             self.err.setText(str(e)); self._go(1)
@@ -318,14 +375,14 @@ class NewProjectDialog(QDialog):
     # --- Projekte, die ein Werkzeug anlegt (composer create-project …) ---------------------------------
     def _start_scaffold(self, loc: Path, opts: dict):
         name = self.name.text().strip()
-        cmd = scaffold_command(self.tpl, name)
+        cmd = scaffold_command(self.eff, name)
         if not shutil.which(cmd[0]):
             self._go(1)
             return self.err.setText(f"'{cmd[0]}' ist nicht installiert – das Projekt kann nicht angelegt werden.")
         root = loc / name
         self._scaffold = (root, root.exists(), opts, self.desc.toPlainText().strip())
         self._go(3)
-        self.prog_title.setText(f"{self.tpl.name} wird angelegt …")
+        self.prog_title.setText(f"{self.eff.name} wird angelegt …")
         self.prog_sub.setText(f"{' '.join(cmd[:3])} – das dauert je nach Netzwerk ein bis zwei Minuten.")
         self.next.setEnabled(False); self.cancel.setText("Abbrechen")
         self.ai_log.clear(); self.bar.setRange(0, 0)
@@ -352,8 +409,8 @@ class NewProjectDialog(QDialog):
             self.prog_sub.setText("Die Meldung steht unten. Mit „Zurück“ lässt sich der Name oder Ort ändern.")
             self.back.setVisible(True); self.cancel.setText("Schließen")
             return
-        log = [f"Projekt '{name}' ({self.tpl.name}) wurde in {root} erstellt…", "  " + " ".join(scaffold_command(self.tpl, name)) + " ✓"]
-        self.result_data = finish_project(self.tpl, name, root, opts, log)
+        log = [f"Projekt '{name}' ({self.eff.name}) wurde in {root} erstellt…", "  " + " ".join(scaffold_command(self.eff, name)) + " ✓"]
+        self.result_data = finish_project(self.eff, name, root, opts, log)
         self.settings.setValue("new_project_location", str(root.parent))
         if desc and backend.available():
             return self._start_ai(desc)
@@ -370,13 +427,13 @@ class NewProjectDialog(QDialog):
         if self._is_ai():
             prompt = project_prompt(name, desc, LANG_HINTS[self.lang_combo.currentText()])
         else:
-            prompt = project_prompt(name, desc, template=self.tpl.name, files=existing)
+            prompt = project_prompt(name, desc, template=self.eff.name, files=existing)
         self._go(3)
         self.prog_title.setText("Claude erstellt dein Projekt …")
         self.prog_sub.setText("Das kann je nach Umfang eine Minute dauern.")
         self.next.setEnabled(False); self.cancel.setText("Abbrechen")
         self.ai_log.clear(); self.bar.setRange(0, 0)
-        self.claude.run(prompt, root, system=SYSTEM_PROJECT, max_turns=40)
+        self.claude.run(prompt, root, system=SYSTEM_APP if self._is_app() else SYSTEM_PROJECT, max_turns=100 if self._is_app() else 40)
 
     def _ai_finished(self, ok, result, _session):
         root, main, log = self.result_data

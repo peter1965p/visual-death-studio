@@ -73,7 +73,7 @@ def test_wizard_lists_and_filters_new_templates(qapp, tmp_path):
     dlg.f_lang.setCurrentText("PHP")
     assert set(ids()) == {"php-console", "php-web", "laravel"}
     dlg.f_lang.setCurrentIndex(0); dlg.search.setText("nuxt")
-    assert ids() == ["nuxt"]
+    assert set(ids()) == {"nuxt", "app"}                                          # „Fertige Anwendung“ nennt Nuxt in der Beschreibung
 
 
 # --- PHP --------------------------------------------------------------------------------------------------
