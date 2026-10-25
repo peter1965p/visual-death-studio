@@ -128,7 +128,7 @@ def stylesheet() -> str:
     return f"""
 * {{ font-family: "Segoe UI", "Noto Sans", "Cantarell", sans-serif; font-size: 12px; }}
 QMainWindow, QDialog {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {c['bg']}, stop:0.6 {c['mid']}, stop:1 {c['bg2']}); color: {c['fg']}; }}
-QMainWindow::separator {{ background: transparent; width: 5px; height: 5px; }}
+QMainWindow::separator {{ background: rgba(0,229,255,0.10); width: 9px; height: 9px; }}
 QMainWindow::separator:hover {{ background: {c['cyan']}; }}
 QWidget {{ color: {c['fg']}; }}
 
