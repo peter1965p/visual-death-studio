@@ -11,7 +11,7 @@ import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication im
 from PySide6.QtCore import QCoreApplication, QSettings, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
-                               QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
+                               QFrame, QScrollArea, QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
 from .build.languages import LANGS, lang_for, parse_problems
@@ -67,6 +67,16 @@ SAMPLES = {
     "hello.go": 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Hallo aus Go!")\n}\n',
     "Program.cs": 'Console.WriteLine("Hallo aus C#!");\n',
 }
+
+
+def _shrinkable(widget, limit=80):
+    """Docks mit hoher Mindesthöhe (Pakete, Web-Element, Änderungen …) blockieren sonst den Teiler: eine Dock-Gruppe ist so hoch wie ihr höchster Reiter.
+    In einer Bildlaufansicht lässt sich der Bereich beliebig klein ziehen, zu enge Inhalte bekommen Rollbalken."""
+    if widget.minimumSizeHint().height() <= limit:
+        return widget
+    area = QScrollArea(); area.setWidget(widget); area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.NoFrame); area.viewport().setAutoFillBackground(False)
+    return area
 
 
 class MainWindow(QMainWindow):
@@ -131,7 +141,7 @@ class MainWindow(QMainWindow):
     def _dock(self, title, widget, area, name):
         d = QDockWidget(title, self)
         d.setObjectName(name)
-        d.setWidget(widget)
+        d.setWidget(_shrinkable(widget))
         d.setProperty("active", False)
         self.addDockWidget(area, d)
         return d

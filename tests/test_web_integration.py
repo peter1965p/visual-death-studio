@@ -215,3 +215,9 @@ def test_f5_uses_the_detected_dev_server_only_for_files_without_an_interpreter(q
         assert "Start-Befehl" in w.output.text.toPlainText()
     finally:
         w.docs.close_all(); w.close()
+
+
+def test_bottom_dock_group_can_be_made_small_even_with_tall_tabs(win):
+    """Eine Dock-Gruppe ist so hoch wie ihr höchster Reiter (früher Pakete mit 359 px): der Teiler ließ sich nicht nach unten ziehen."""
+    for d in (win.d_output, win.d_packages, win.d_inspector, win.d_changes):
+        assert d.minimumSizeHint().height() <= 130, d.windowTitle()
