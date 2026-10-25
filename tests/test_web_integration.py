@@ -221,3 +221,22 @@ def test_bottom_dock_group_can_be_made_small_even_with_tall_tabs(win):
     """Eine Dock-Gruppe ist so hoch wie ihr höchster Reiter (früher Pakete mit 359 px): der Teiler ließ sich nicht nach unten ziehen."""
     for d in (win.d_output, win.d_packages, win.d_inspector, win.d_changes):
         assert d.minimumSizeHint().height() <= 130, d.windowTitle()
+
+
+def test_close_folder_leaves_the_ide_without_a_project_and_stays_closed(win, tmp_path, monkeypatch):
+    from vds import app as appmod
+    from vds.ui import startpage
+    empty = tmp_path / "leer"; empty.mkdir()
+    monkeypatch.setattr(appmod, "empty_root", lambda: empty)
+    proj = tmp_path / "projekt"; proj.mkdir(); (proj / "a.py").write_text("print(1)\n")
+    win.set_root(proj); win.docs.open(proj / "a.py")
+    win.close_folder()
+    assert win.root == empty and win.docs.current_doc() is None
+    assert win.d_explorer.windowTitle().endswith("kein Ordner")
+    assert win.settings.value("root") == ""
+    assert not any(i["path"] == str(empty) for i in startpage.load_recent())
+    w2 = MainWindow()                                     # nächster Start: bleibt ohne Ordner
+    try:
+        assert w2.root == empty
+    finally:
+        w2.close()

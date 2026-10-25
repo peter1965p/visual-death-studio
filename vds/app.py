@@ -8,7 +8,7 @@ from urllib.parse import unquote, urlparse
 
 import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication importiert werden
 
-from PySide6.QtCore import QCoreApplication, QSettings, QTimer, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QSettings, QStandardPaths, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
                                QFrame, QScrollArea, QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
@@ -69,6 +69,13 @@ SAMPLES = {
 }
 
 
+def empty_root() -> Path:
+    """Platzhalter-Ordner für „kein Ordner geöffnet“: leer, der Explorer zeigt nichts, und er landet nicht in der Liste der zuletzt geöffneten Projekte."""
+    p = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "kein-ordner"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def _shrinkable(widget, limit=80):
     """Docks mit hoher Mindesthöhe (Pakete, Web-Element, Änderungen …) blockieren sonst den Teiler: eine Dock-Gruppe ist so hoch wie ihr höchster Reiter.
     In einer Bildlaufansicht lässt sich der Bereich beliebig klein ziehen, zu enge Inhalte bekommen Rollbalken."""
@@ -91,7 +98,10 @@ class MainWindow(QMainWindow):
         if ef:
             f = QFont(); f.fromString(str(ef)); set_default_font(f)
         saved = self.settings.value("root")
-        self.root = Path(saved) if saved and Path(saved).is_dir() else ROOT / "workspace"
+        if self.settings.contains("root") and not saved:
+            self.root = empty_root()                        # Ordner wurde mit „Ordner schließen“ geschlossen
+        else:
+            self.root = Path(saved) if saved and Path(saved).is_dir() else ROOT / "workspace"
         self.root.mkdir(parents=True, exist_ok=True)
         if not any(self.root.iterdir()) and self.root == ROOT / "workspace":
             for n, t in SAMPLES.items():
@@ -236,6 +246,7 @@ class MainWindow(QMainWindow):
             newproject=A("Projekt…", self.new_project, "Ctrl+Shift+N", "solution", "#b44cff"),
             viewcode=A("Code anzeigen", self.view_code, "F7"), viewdesigner=A("Designer anzeigen", self.view_designer, "Shift+F7"),
             openfolder=A("Ordner öffnen…", self.open_folder, "Ctrl+Shift+O", "folder"),
+            closefolder=A("Ordner schließen", self.close_folder),
             save=A("Speichern", self.save, "Ctrl+S", "save"),
             saveall=A("Alle speichern", self.save_all, "Ctrl+Shift+S", "save"),
             close=A("Schließen", lambda: self.docs.count() and self.docs.close_tab(self.docs.currentIndex()), "Ctrl+F4"),
@@ -321,7 +332,7 @@ class MainWindow(QMainWindow):
                 else:
                     m.addAction(it)
             return m
-        datei = menu("&Datei", ["NEU", a["openfolder"], None, a["startpage"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
+        datei = menu("&Datei", ["NEU", a["openfolder"], a["closefolder"], None, a["startpage"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
         self.m_recent = QMenu("Zuletzt geöffnete Projekte", datei)
         self.m_recent.aboutToShow.connect(self._fill_recent)
         datei.insertMenu(a["startpage"], self.m_recent)
@@ -697,11 +708,13 @@ class MainWindow(QMainWindow):
         self.tests.set_root(path, self.runner.interpreter(path / "x.py"))
         QTimer.singleShot(1500, self.tests.discover)
         self.explorer.set_root(path)
-        self.d_explorer.setWindowTitle(f"Projektmappen-Explorer – {path.name}")
+        closed = path == empty_root()
+        self.d_explorer.setWindowTitle("Projektmappen-Explorer – kein Ordner" if closed else f"Projektmappen-Explorer – {path.name}")
         self.runner.build_dir = path / ".vds" / "bin"
         self.chat.set_root(path)
         self.inspector.set_root(path)
-        startpage.remember(path)
+        if not closed:
+            startpage.remember(path)
         last = self.settings.value(f"web/url/{path}")
         if last and not self.preview.current_url():
             self.preview.url.setText(str(last))
@@ -718,6 +731,19 @@ class MainWindow(QMainWindow):
             if self.docs.close_all():
                 self.set_root(Path(p))
                 self._restore_session()
+
+    def close_folder(self):
+        """Schließt den Projektordner komplett: Dokumente, Dev-Server und Debugger werden beendet, beim nächsten Start bleibt die IDE ohne Ordner."""
+        if self.root == empty_root():
+            return
+        self._save_session()
+        if not self.docs.close_all():
+            return
+        self.dbg.stop()
+        self.runner.stop()
+        self.set_root(empty_root())
+        self.settings.setValue("root", "")
+        self.show_start_page()
 
     # --- Öffnen / Sitzung -------------------------------------------------------------------
     def _open_file(self, path: Path):
@@ -1392,7 +1418,7 @@ class MainWindow(QMainWindow):
         self.lsp.shutdown()
         if not self.docs.close_all():
             return e.ignore()
-        self.settings.setValue("root", str(self.root))
+        self.settings.setValue("root", "" if self.root == empty_root() else str(self.root))
         self.runner.stop()
         self.preview.shutdown()
         self.terminal.shutdown()
