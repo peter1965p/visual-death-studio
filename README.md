@@ -7,6 +7,10 @@ Inspiriert von Visual Studio, aber mit eigenem Design.
 
 ![Code-Editor](docs/editor.png)
 
+Startseite und Web-Vorschau mit einer fertig gebauten Laravel-Unternehmensseite (Projekt aus „Fertige Anwendungen“, F5 startet den Server):
+
+![Startseite und Web-Vorschau](docs/web-vorschau.png)
+
 ## Funktionen
 
 - **Formular-Designer** mit Toolbox (48 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste; Dialoge wie Datei öffnen/speichern, Ordner, Farbe, Schrift, Drucken, Druckvorschau, MessageBox als Komponentenleiste), Eigenschaften, Farben und Schriften; erzeugt PySide6-Code
