@@ -1,6 +1,6 @@
 """Syntax-Highlighting über Pygments (deckt praktisch alle Sprachen ab).
 Der ganze Text wird entprellt neu gelext, damit Mehrzeiler (Kommentare, Strings) stimmen."""
-from pygments.lexers import TextLexer, get_lexer_for_filename
+from pygments.lexers import TextLexer, get_lexer_for_filename, get_lexer_by_name
 from pygments.token import Comment, Keyword, Name, Number, Operator, String, Token
 from pygments.util import ClassNotFound
 from PySide6.QtCore import QTimer
@@ -63,9 +63,51 @@ class PygmentsHighlighter(QSyntaxHighlighter):
             self._timer.start()
 
     def set_filename(self, filename: str):
+        if not filename:
+            self.lexer = TextLexer()
+            return
         try:
-            self.lexer = get_lexer_for_filename(filename, stripnl=False, ensurenl=False) if filename else TextLexer()
+            self.lexer = get_lexer_for_filename(filename, stripnl=False, ensurenl=False) #if filename else TextLexer()
+            return
         except ClassNotFound:
+            pass
+        
+        # 2. Manuelle Zuordnung für Dateien, die Pygments manchmal verpasst
+        # (z.B. wenn die Endung mehrdeutig ist oder Pygments zu streng ist)
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+        
+        # Laravel / Web spezifische Erweiterungen
+        manual_map = {
+            'blade.php': 'php',
+            'env': 'text',       # .env Dateien sind oft nur Text
+            'yml': 'yaml',
+            'yaml': 'yaml',
+            'json': 'json',
+            'css': 'css',
+            'scss': 'scss',
+            'less': 'less',
+            'js': 'javascript',
+            'jsx': 'jsx',
+            'ts': 'typescript',
+            'tsx': 'tsx',
+            'vue': 'vue',
+            'html': 'html',
+            'xml': 'xml',
+            'sql': 'sql',
+            'sh': 'bash',
+            'bat': 'batch',
+            'md': 'markdown',
+            'txt': 'text',
+            'lock': 'text',      # composer.lock, package-lock.json
+            'gitignore': 'text',
+        }
+        if ext in manual_map:
+            try:
+                self.lexer = get_lexer_for_name(manual_map[ext], stripnl=False, ensurenl=False)
+            except ClassNotFound:
+                pass
+                self.lexer = TextLexer()
+        else:
             self.lexer = TextLexer()
         self._cache = {}
 

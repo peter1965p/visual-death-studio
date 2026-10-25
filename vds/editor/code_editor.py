@@ -20,6 +20,7 @@ from ..theme import t as tc
 SEV_COLOR = {k: tc(v) for k, v in {"error": "#ff4d6d", "warning": "#ffc474", "info": "#5ee7ff"}.items()}
 
 
+
 class _Gutter(QWidget):
     def __init__(self, ed):
         super().__init__(ed)
@@ -91,6 +92,9 @@ class CodeEditor(QPlainTextEdit):
         self.cursorPositionChanged.connect(self._ai_cursor_moved)
         self.viewport().setMouseTracking(True)
         self.highlighter = PygmentsHighlighter(self.document(), filename)
+        from pygments.lexers import get_lexer_for_filename
+        print(f"[Editor] Sprache für {filename}: {get_lexer_for_filename(filename).name}")
+            
         self.gutter = _Gutter(self)
         self.blockCountChanged.connect(lambda: self.setViewportMargins(self.gutter_width(), 0, 0, 0))
         self.updateRequest.connect(self._scroll_gutter)
