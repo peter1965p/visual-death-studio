@@ -240,3 +240,19 @@ def test_close_folder_leaves_the_ide_without_a_project_and_stays_closed(win, tmp
         assert w2.root == empty
     finally:
         w2.close()
+
+
+def test_start_page_survives_closing_its_tab_and_closing_the_folder(win, tmp_path, monkeypatch):
+    """close_tab löschte die Startseite (deleteLater): danach ließ sie sich weder per Menü noch nach „Ordner schließen“ wieder zeigen."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from shiboken6 import isValid
+    from vds import app as appmod
+    empty = tmp_path / "leer"; empty.mkdir()
+    monkeypatch.setattr(appmod, "empty_root", lambda: empty)
+    win.show_start_page(); win.docs.close_all()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert isValid(win.start)
+    win.show_start_page(); assert win.docs.count() == 1
+    win.close_folder()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert isValid(win.start) and win.docs.count() == 1 and win.docs.tabText(0) == "Startseite"

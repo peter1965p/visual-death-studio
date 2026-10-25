@@ -176,7 +176,7 @@ class Documents(QTabWidget):
             self.removeTab(index)
             if view is getattr(self, "page", None):
                 self.page = None
-            view.deleteLater()
+            view.hide()                                  # nicht löschen: die Startseite gehört dem Hauptfenster und wird wieder gezeigt
             return True
         if doc.modified:
             r = QMessageBox.question(self, "Visual Death Studio", f"Änderungen an '{doc.path.name}' speichern?",
