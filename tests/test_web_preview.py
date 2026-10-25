@@ -135,6 +135,13 @@ def test_pick_reports_element_details_and_navigates(qapp, pump, panel):
     assert js(panel, pump, "window.__vds.selected().path").endswith("span:nth-of-type(1)")
 
 
+def test_inspector_is_dimmed_until_an_element_is_picked(qapp, pump, panel):
+    ins = panel.inspector
+    assert not ins.body.isEnabled() and not ins.btn_src.isEnabled() and not any(b.isEnabled() for b in ins.nav_buttons)
+    pick(panel, pump, "#titel")
+    assert ins.body.isEnabled() and ins.btn_src.isEnabled() and all(b.isEnabled() for b in ins.nav_buttons)
+
+
 def test_pick_mode_off_leaves_the_page_alone(qapp, pump, panel):
     got = []
     panel.picked.connect(got.append)

@@ -86,13 +86,13 @@ class WebInspector(QWidget):
         self.fields: dict = {}
         self.head = QLabel("Kein Element gewählt – in der Web-Vorschau „⌖ Auswählen“ und ein Element anklicken.")
         self.head.setWordWrap(True); self.head.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        nav = QHBoxLayout()
+        nav = QHBoxLayout(); self.nav_buttons = []
         for text, tip, fn in (("↑ Eltern", "Übergeordnetes Element", lambda: self._rel("parent")), ("↓ Kind", "Erstes Kindelement", lambda: self._rel("child")),
                               ("← Vorher", "Vorheriges Geschwister", lambda: self._rel("prev")), ("→ Nachher", "Nächstes Geschwister", lambda: self._rel("next"))):
-            b = QPushButton(text); b.setToolTip(tip); b.clicked.connect(fn); nav.addWidget(b)
+            b = QPushButton(text); b.setToolTip(tip); b.clicked.connect(fn); nav.addWidget(b); self.nav_buttons.append(b)
         self.text_edit = QLineEdit(); self.text_edit.setPlaceholderText("Text des Elements")
         self.text_edit.editingFinished.connect(self._text_changed)
-        body = QWidget(); form_lay = QVBoxLayout(body); form_lay.setContentsMargins(4, 4, 4, 4)
+        self.body = body = QWidget(); form_lay = QVBoxLayout(body); form_lay.setContentsMargins(4, 4, 4, 4)
         tform = QFormLayout(); tform.addRow("Text", self.text_edit); form_lay.addLayout(tform)
         for title, props in GROUPS:
             box = QGroupBox(title); f = QFormLayout(box)
@@ -120,6 +120,7 @@ class WebInspector(QWidget):
         panel.picked.connect(self.show_info)
         panel.changed.connect(self._changed)
         panel.textChanged.connect(self._text_msg)
+        self._set_active(False)
         self._refresh()
 
     def set_root(self, root: Path):
@@ -128,6 +129,7 @@ class WebInspector(QWidget):
     # --- Anzeige --------------------------------------------------------------------------------------------
     def show_info(self, info: dict):
         self.info = info
+        self._set_active(True)
         self.head.setText(f"{describe(info)}   {round(info['rect']['w'])}×{round(info['rect']['h'])}\n{info['path']}")
         ov = info.get("overrides", {})
         for p, w in self.fields.items():
@@ -136,6 +138,11 @@ class WebInspector(QWidget):
         self.text_edit.setEnabled(not info.get("children")); self.text_edit.setText(info.get("text", ""))
         self.src_list.clear(); self.candidates = []
         self.btn_src.setText("Zum Code springen" if not info.get("vds") else f"Im Designer öffnen ({info['vds']})")
+
+    def _set_active(self, on: bool):
+        """Ohne gewähltes Element sind Navigation, Stilfelder und „Zum Code springen“ abgeblendet, damit klar ist, dass erst ein Element angeklickt werden muss."""
+        for w in (*self.nav_buttons, self.body, self.btn_src):
+            w.setEnabled(on)
 
     def _rel(self, kind: str):
         self.panel.eval(f"window.__vds && window.__vds.selectRelative({json.dumps(kind)})")
