@@ -4,7 +4,7 @@ import json
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QMenu, QScrollArea, QVBoxLayout, QWidget
 from shiboken6 import delete as delete_qobject
 
 from . import layouts
@@ -479,6 +479,23 @@ class Canvas(QWidget):
                          orig={s: (c["x"], c["y"], c["w"], c["h"]) for s in movers for c in [self.control(s)]},
                          abs0={s: self.canvas_rect(s).topLeft() - QPoint(M, M + TB) for s in movers},
                          form=(self.model["width"], self.model["height"]))
+
+    def contextMenuEvent(self, e):
+        p = e.pos()
+        cid = self.item_at(p)
+        if cid and cid not in self.sel:
+            self.set_sel([cid])
+        elif not cid and not any(r.contains(p) for r in self.tray_rects().values()):
+            self.set_sel([])
+        menu = QMenu(self)
+        has_sel = bool(self.sel)
+        for text, fn, on in (("Ausschneiden", self.cut, has_sel), ("Kopieren", self.copy, has_sel),
+                             ("Einfügen", self.paste, bool(self.clipboard or getattr(self, "clip_comps", None))),
+                             ("Löschen", self.delete_selected, has_sel)):
+            menu.addAction(text, fn).setEnabled(on)
+        menu.addSeparator()
+        menu.addAction("Alles auswählen", self.select_all)
+        menu.exec(e.globalPos())
 
     def mouseDoubleClickEvent(self, e):
         cid = self.item_at(e.position().toPoint())
