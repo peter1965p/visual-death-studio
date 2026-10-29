@@ -1,6 +1,7 @@
 """Syntax-Highlighting über Pygments (deckt praktisch alle Sprachen ab).
 Der ganze Text wird entprellt neu gelext, damit Mehrzeiler (Kommentare, Strings) stimmen."""
-from pygments.lexers import TextLexer, get_lexer_for_filename, get_lexer_by_name
+from pygments.lexer import DelegatingLexer, RegexLexer, bygroups, using
+from pygments.lexers import HtmlLexer, PhpLexer, TextLexer, get_lexer_for_filename, get_lexer_by_name
 from pygments.token import Comment, Keyword, Name, Number, Operator, String, Token
 from pygments.util import ClassNotFound
 from PySide6.QtCore import QTimer
@@ -10,6 +11,32 @@ from ..theme import TOKENS
 
 CONTROL = {"if", "else", "elif", "for", "while", "return", "break", "continue", "try", "except", "finally", "raise",
            "switch", "case", "default", "do", "match", "yield", "await", "goto", "throw", "catch", "in", "is"}
+
+
+class _BladeTemplateLexer(RegexLexer):
+    """Blade-Anteil: Kommentare, {{ }} / {!! !!}, @Direktiven; alles andere geht als Other an den HTML-Lexer."""
+    name = "BladeTemplate"
+    tokens = {
+        "root": [
+            (r"\{\{--.*?--\}\}", Comment.Multiline),
+            (r"(\{\{|\{!!)(.*?)(\}\}|!!\})", bygroups(Comment.Preproc, using(PhpLexer, startinline=True), Comment.Preproc)),
+            (r"(?<![\w@])(@)(php)(\b)", bygroups(Keyword, Keyword, Token.Other), "phpblock"),
+            (r"@@\w+", Token.Other),
+            (r"@\w+", Keyword),
+            (r"[^@{]+", Token.Other),
+            (r"[@{]", Token.Other),
+        ],
+        "phpblock": [
+            (r"(?s)(.*?)(@endphp)", bygroups(using(PhpLexer, startinline=True), Keyword), "#pop"),
+        ],
+    }
+
+
+class BladeLexer(DelegatingLexer):
+    name = "Blade"
+
+    def __init__(self, **options):
+        super().__init__(HtmlLexer, _BladeTemplateLexer, **options)
 
 
 def _fmt(color, italic=False):
@@ -65,20 +92,31 @@ class PygmentsHighlighter(QSyntaxHighlighter):
     def set_filename(self, filename: str):
         if not filename:
             self.lexer = TextLexer()
+            self._cache = {}
             return
+
+        # 1. Spezieller Vorab-Check für Laravel Blade Dateien (.blade.php)
+        if filename.lower().endswith(".blade.php"):
+            try:
+                self.lexer = BladeLexer(stripnl=False, ensurenl=False)
+                self._cache = {}
+                return
+            except ClassNotFound:
+                pass  # Fallback auf Standard-Handling, falls der Blade-Lexer fehlt
+        
+        # 2. Regulärer Versuch über Pygments Dateinamen-Erkennung
         try:
-            self.lexer = get_lexer_for_filename(filename, stripnl=False, ensurenl=False) #if filename else TextLexer()
+            self.lexer = get_lexer_for_filename(filename, stripnl=False, ensurenl=False)
+            self._cache = {}
             return
         except ClassNotFound:
             pass
         
-        # 2. Manuelle Zuordnung für Dateien, die Pygments manchmal verpasst
-        # (z.B. wenn die Endung mehrdeutig ist oder Pygments zu streng ist)
+        # 3. Manuelle Zuordnung für Sonderfälle oder mehrdeutige Endungen
         ext = filename.lower().split('.')[-1] if '.' in filename else ''
         
         # Laravel / Web spezifische Erweiterungen
         manual_map = {
-            'blade.php': 'php',
             'env': 'text',       # .env Dateien sind oft nur Text
             'yml': 'yaml',
             'yaml': 'yaml',
@@ -101,14 +139,15 @@ class PygmentsHighlighter(QSyntaxHighlighter):
             'lock': 'text',      # composer.lock, package-lock.json
             'gitignore': 'text',
         }
+        
         if ext in manual_map:
             try:
-                self.lexer = get_lexer_for_name(manual_map[ext], stripnl=False, ensurenl=False)
+                self.lexer = get_lexer_by_name(manual_map[ext], stripnl=False, ensurenl=False)
             except ClassNotFound:
-                pass
                 self.lexer = TextLexer()
         else:
             self.lexer = TextLexer()
+            
         self._cache = {}
 
     def relex(self):
