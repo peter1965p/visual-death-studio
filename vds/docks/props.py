@@ -1,5 +1,5 @@
 """Eigenschaften-Fenster: Dateiinfos oder – bei aktivem Designer – Objektauswahl plus Property-Grid."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QColorDialog, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QSpinBox, QStackedWidget, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -225,5 +225,8 @@ class PropertiesDock(QWidget):
                     self._row(label, self._edit(kind, c["props"].get(k, KIND_DEFAULT[kind]), lambda v, k=k: cv.set_prop(cid, k, v), CHOICES.get(k)))
 
     def _rename(self, cid, v):
-        if not self.designer.canvas.set_prop(cid, "name", v.strip()):
+        v = v.strip()
+        if not self.designer.canvas.set_prop(cid, "name", v):
             self._build_grid(cid)
+        elif v != cid:
+            QTimer.singleShot(0, lambda: self.designer and self._build_grid(v))      # Setter der Felder halten sonst den alten Namen

@@ -266,3 +266,18 @@ def test_properties_grid_lists_component_properties(qapp):
     labels = [dock.grid.item(r, 0).text() for r in range(dock.grid.rowCount()) if dock.grid.item(r, 0)]
     assert "Symbol" in labels and "Schaltflächen" in labels and "Location X" not in labels
     assert dock.combo.count() == 3 and dock.combo.currentText().startswith("messageBox1")
+
+
+def test_properties_still_edit_the_control_after_renaming_it(qapp):
+    from vds.docks.props import PropertiesDock
+    d, cv = make(qapp, ctl("Button", "b1", 20, 40))
+    dock = PropertiesDock(); dock.show_designer(d)
+    cv.set_sel(["b1"]); qapp.processEvents()
+    name = dock.grid.cellWidget(1, 1)
+    name.setText("btn_close"); name.editingFinished.emit()
+    qapp.processEvents()
+    dock.grid.cellWidget(5, 1).setValue(200)                                  # Width
+    text = dock.grid.cellWidget(8, 1); text.setText("Verlassen"); text.editingFinished.emit()
+    c = cv.control("btn_close")
+    assert (c["w"], c["props"]["text"]) == (200, "Verlassen")
+    assert cv.items["btn_close"].width() == 200 and cv.items["btn_close"].text() == "Verlassen"
