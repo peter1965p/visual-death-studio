@@ -143,6 +143,9 @@ class PropertiesDock(QWidget):
         for c in m["components"]:
             self.combo.addItem(f"{c['name']}  ({c['type']})")
         self.combo.setCurrentIndex(0 if cur is None else 1 + [c["name"] for c in m["controls"] + m["components"]].index(cur))
+        n = len(self.designer.canvas.sel)
+        if n > 1:
+            self.combo.setItemText(0, f"{n} Elemente ausgewählt")
         self.combo.blockSignals(False)
         if source != "grid":
             self._build_grid(cur)

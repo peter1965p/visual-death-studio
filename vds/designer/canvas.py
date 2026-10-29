@@ -71,6 +71,12 @@ class Overlay(QWidget):
                 continue
             p.setPen(QPen(QColor(tc("#00b8d9")), 1, Qt.DotLine)); p.setBrush(Qt.NoBrush)
             p.drawRect(c.canvas_rect(cid).adjusted(0, 0, -1, -1))
+            if len(c.sel) > 1:                      # Gruppe: Anfasser an jedem Mitglied, das erste (weiß) ist das Primärelement
+                r = c.canvas_rect(cid)
+                p.setPen(QColor("black")); p.setBrush(QColor("white" if cid == c.sel[0] else "black"))
+                for hx, hy in HANDLES:
+                    p.drawRect(int(r.x() + hx * r.width() - HS // 2), int(r.y() + hy * r.height() - HS // 2), HS, HS)
+                p.setBrush(Qt.NoBrush)
         for r in c.handle_rects().values():
             p.setPen(QColor("black")); p.setBrush(QColor("white")); p.drawRect(r)
         p.setPen(QPen(GUIDE, 1))
