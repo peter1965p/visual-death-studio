@@ -26,6 +26,7 @@ class _Model(QFileSystemModel):
 
 class Explorer(QTreeView):
     fileOpened = Signal(str)
+    openCodeRequested = Signal(str)       # Code zu einem Formular-Paar (Form1.py) direkt öffnen
     selectionPath = Signal(str)
     fileDeleted = Signal(str)
     fileRenamed = Signal(str, str)
@@ -107,6 +108,9 @@ class Explorer(QTreeView):
         m.addSeparator()
         cur = self.path_at(self.currentIndex())
         if cur.is_file():
+            if cur.name.endswith(".form.json") or cur.with_name(cur.stem + ".form.json").is_file():
+                m.addAction("Code anzeigen", lambda: self.openCodeRequested.emit(str(cur)))
+                m.addSeparator()
             m.addAction("Zum Vergleichen auswählen", lambda: self.markForCompare.emit(str(cur)))
             m.addAction("Mit ausgewählter Datei vergleichen", lambda: self.compareWithMarked.emit(str(cur)))
             m.addSeparator()

@@ -404,6 +404,7 @@ class MainWindow(QMainWindow):
     def _wire(self):
         e = self.explorer
         e.fileOpened.connect(lambda p: self._open_file(Path(p)))
+        e.openCodeRequested.connect(lambda p: self._open_code(Path(p)))
         e.selectionPath.connect(self._explorer_selected)
         self.docs.docOpened.connect(lambda d: d.kind == "form" and d.view.eventRequested.connect(lambda cid, d=d: self._open_handler(d, cid)))
         e.fileDeleted.connect(lambda p: self.docs.close_path(Path(p)))
@@ -752,6 +753,13 @@ class MainWindow(QMainWindow):
         form = path.with_name(path.stem + FORM_SUFFIX)
         if path.suffix in (".py", ".java", ".tsx", ".vue") and form.is_file():
             return self.docs.open(form)
+        return self.docs.open(path)
+
+    def _open_code(self, path: Path):
+        """Code-Ansicht eines Formular-Paares: Form1.form.json bzw. Form1.py -> Form1.py (ohne Designer-Umleitung)."""
+        if path.name.endswith(FORM_SUFFIX):
+            d = self.docs.open(path)
+            return d and d.run_target and self.docs.open(d.run_target)
         return self.docs.open(path)
 
     def _session_key(self) -> str:

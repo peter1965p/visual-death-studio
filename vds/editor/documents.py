@@ -2,8 +2,8 @@
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QMessageBox, QTabWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QMenu, QMessageBox, QTabWidget
 
 from ..designer import codegen, targets
 from ..designer.canvas import FormDesigner
@@ -67,9 +67,25 @@ class Documents(QTabWidget):
         self.setMovable(True)
         self.setDocumentMode(True)
         self.tabCloseRequested.connect(self.close_tab)
+        self.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabBar().customContextMenuRequested.connect(self._tab_menu)
         self.currentChanged.connect(lambda _i: (self.currentDocChanged.emit(self.current_doc()), self._emit_cursor()))
         self.docs: dict[Path, Document] = {}
         self.intel = None            # LspManager (vom Hauptfenster gesetzt)
+
+    def _tab_menu(self, pos):
+        """Rechtsklick auf einen Tab: bei Formular-Paaren zwischen Designer und Code wechseln."""
+        i = self.tabBar().tabAt(pos)
+        doc = next((d for d in self.docs.values() if d.view is self.widget(i)), None) if i >= 0 else None
+        if not doc or doc.kind == "diff":
+            return
+        m = QMenu(self)
+        if doc.kind == "form" and doc.run_target:
+            m.addAction("Code anzeigen", lambda: (doc.save(), self.open(doc.run_target)))
+        elif doc.kind == "code" and doc.path.with_name(doc.path.stem + FORM_SUFFIX).is_file():
+            m.addAction("Designer anzeigen", lambda: self.open(doc.path.with_name(doc.path.stem + FORM_SUFFIX)))
+        m.addAction("Schließen", lambda: self.close_tab(self.indexOf(doc.view)))
+        m.exec(self.tabBar().mapToGlobal(pos))
 
     def current_doc(self) -> Document | None:
         w = self.currentWidget()
