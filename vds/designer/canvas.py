@@ -459,8 +459,12 @@ class Canvas(QWidget):
                 return self._begin("resize", p, i)
         cid = self.item_at(p)
         if cid:
+            self._untoggle = None
             if e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
-                self.set_sel([s for s in self.sel if s != cid] if cid in self.sel else self.sel + [cid])
+                if cid in self.sel:
+                    self._untoggle = cid                # Abwählen erst beim Loslassen, sonst bliebe das gezogene Element zurück
+                else:
+                    self.set_sel(self.sel + [cid])
             elif cid not in self.sel:
                 self.set_sel([cid])
             self._begin("move", p)
@@ -575,6 +579,9 @@ class Canvas(QWidget):
         d = self.drag
         if d and d["mode"] == "move" and d["pushed"]:
             self._drop_into_container(d, e.position().toPoint())
+        elif d and d["mode"] == "move" and getattr(self, "_untoggle", None) in self.sel:
+            self.set_sel([s for s in self.sel if s != self._untoggle])
+        self._untoggle = None
         self.drag, self.band, self.guides = None, None, []
         self.overlay.update()
 
