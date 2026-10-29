@@ -1,5 +1,6 @@
 """Claude-Agent über die API: dieselbe Schnittstelle wie `ClaudeProcess` (text/tool/finished), aber mit eigenem Schlüssel und eigenen Dateiwerkzeugen.
 Die Schleife läuft in einem Thread; Signale kommen sicher im GUI-Thread an."""
+import base64
 import threading
 from pathlib import Path
 
@@ -26,24 +27,25 @@ class ApiAgent(QObject):
     def running(self) -> bool:
         return self._thread is not None
 
-    def run(self, prompt: str, cwd: Path, session: str | None = None, allow_bash: bool = False, system: str | None = None, max_turns: int = 30):
+    def run(self, prompt: str, cwd: Path, session: str | None = None, allow_bash: bool = False, system: str | None = None, max_turns: int = 30,
+            images: list | None = None):
         if self.running:
             return
         if session != self.SESSION:
             self.history = []                                  # neue Unterhaltung
         self._cancel = threading.Event()
         cfg = api.config("chat")
-        self._thread = threading.Thread(target=self._loop, args=(cfg, Path(cwd), allow_bash, system or "", max_turns, prompt), daemon=True)
+        self._thread = threading.Thread(target=self._loop, args=(cfg, Path(cwd), allow_bash, system or "", max_turns, prompt, images or []), daemon=True)
         self._thread.start()
 
     def stop(self):
         self._cancel.set()
 
     # --- Schleife (Thread) ---------------------------------------------------------------------
-    def _loop(self, cfg, cwd, allow_bash, system, max_turns, prompt):
+    def _loop(self, cfg, cwd, allow_bash, system, max_turns, prompt, images=()):
         result = (False, "Unbekannter Fehler.", self.SESSION)
         try:
-            result = self._agent(cfg, cwd, allow_bash, system, max_turns, prompt)
+            result = self._agent(cfg, cwd, allow_bash, system, max_turns, prompt, images)
         except api.Cancelled:
             self.history = self._trim(self.history)
             result = (False, "Abgebrochen.", self.SESSION)
@@ -53,6 +55,15 @@ class ApiAgent(QObject):
         finally:
             self._thread = None
         self.finished.emit(*result)
+
+    @staticmethod
+    def _user_content(prompt: str, images) -> str | list:
+        """Text allein oder Bild-Blöcke (PNG, base64) gefolgt vom Text."""
+        if not images:
+            return prompt
+        blocks = [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(Path(i).read_bytes()).decode()}}
+                  for i in images]
+        return blocks + [{"type": "text", "text": prompt}]
 
     @staticmethod
     def _trim(history: list) -> list:
@@ -65,14 +76,14 @@ class ApiAgent(QObject):
             history.pop()
         return history
 
-    def _agent(self, cfg, cwd, allow_bash, system, max_turns, prompt) -> tuple:
+    def _agent(self, cfg, cwd, allow_bash, system, max_turns, prompt, images=()) -> tuple:
         if not cfg.key:
             return False, "Kein API-Schlüssel hinterlegt (Extras → Optionen → Claude).", self.SESSION
         client = api.make_client(cfg)
         box = ToolBox(cwd, allow_bash)
         tools = box.definitions(eager=cfg.official)
         messages = self.history
-        messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": self._user_content(prompt, images)})
         last_text = ""
         for _turn in range(max_turns):
             msg = api.stream_message(client, cfg, api.request_kwargs(cfg, system, messages, tools), self._cancel, on_text=self._emit_text)

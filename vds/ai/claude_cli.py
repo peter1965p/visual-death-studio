@@ -58,13 +58,18 @@ class ClaudeProcess(QObject):
         return self.proc is not None
 
     def run(self, prompt: str, cwd: Path, session: str | None = None, allow_bash: bool = False,
-            system: str | None = None, max_turns: int = 30):
+            system: str | None = None, max_turns: int = 30,
+            images: list | None = None):
         if self.running:
             return
         self._cwd, self._buf, self._err, self._result = Path(cwd), "", "", None
         tools = FILE_TOOLS + (",Bash" if allow_bash else "")
         args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
                 "--allowedTools", tools, "--max-turns", str(max_turns)]
+        if images:                                              # Claude Code liest Bilder über das Read-Werkzeug von der Platte
+            args[1] = prompt + "\n\n[Angehängte Bilder – bitte mit dem Read-Werkzeug ansehen:\n" + "\n".join(str(i) for i in images) + "\n]"
+            for d in sorted({str(Path(i).parent) for i in images}):
+                args += ["--add-dir", d]
         if session:
             args += ["--resume", session]
         if system:

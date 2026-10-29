@@ -1,7 +1,10 @@
 """Claude-Chat-Panel: spricht über das lokale Claude Code mit dem geöffneten Projekt."""
+import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout,
                                QWidget)
 
@@ -11,6 +14,18 @@ from ..ai.prompts import SYSTEM_CHAT
 
 class _Input(QPlainTextEdit):
     submitted = Signal()
+    imagePasted = Signal(QImage)
+
+    def canInsertFromMimeData(self, source):
+        return source.hasImage() or super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):
+        if source.hasImage():
+            img = source.imageData()
+            if isinstance(img, QImage) and not img.isNull():
+                self.imagePasted.emit(img)
+                return
+        super().insertFromMimeData(source)
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and not e.modifiers() & Qt.ShiftModifier:
@@ -31,6 +46,8 @@ class ChatPanel(QWidget):
         self.active_file = lambda: (None, "")        # -> (Pfad|None, Auswahltext)
         self.md = ""
         self.claude = None
+        self.images: list[Path] = []                 # eingefügte Bilder, die mit der nächsten Nachricht gehen
+        self._tmp = tempfile.TemporaryDirectory(prefix="vds-chat-")
         self._attach_agent()
 
         self.view = QTextBrowser()
@@ -39,6 +56,8 @@ class ChatPanel(QWidget):
         self.input.setPlaceholderText("Claude fragen … (Enter sendet, Umschalt+Enter = neue Zeile)")
         self.input.setFixedHeight(72)
         self.input.submitted.connect(self.send)
+        self.input.imagePasted.connect(self.add_image)
+        self.attach = QPushButton(); self.attach.setToolTip("Angehängte Bilder entfernen"); self.attach.clicked.connect(self.clear_images); self.attach.hide()
         self.ctx = QCheckBox("Aktive Datei mitsenden"); self.ctx.setChecked(True)
         self.bash = QCheckBox("Befehle erlauben")
         self.bash.setToolTip("Erlaubt Claude, Shell-Befehle in deinem Projekt auszuführen (z. B. Tests, pip install). "
@@ -50,7 +69,7 @@ class ChatPanel(QWidget):
         opts = QHBoxLayout(); opts.addWidget(self.ctx); opts.addWidget(self.bash); opts.addStretch()
         btns = QHBoxLayout(); btns.addWidget(new_btn); btns.addStretch(); btns.addWidget(self.status); btns.addWidget(self.stop_btn); btns.addWidget(self.send_btn)
         lay = QVBoxLayout(self); lay.setContentsMargins(6, 6, 6, 6); lay.setSpacing(6)
-        for x in (self.view, self.input):
+        for x in (self.view, self.input, self.attach):
             lay.addWidget(x)
         lay.addLayout(opts); lay.addLayout(btns)
         self.reset()
@@ -95,13 +114,29 @@ class ChatPanel(QWidget):
         self.view.setMarkdown(self.md)
         sb = self.view.verticalScrollBar(); sb.setValue(sb.maximum())
 
+    # --- Bilder ------------------------------------------------------------------------------
+    def add_image(self, img: QImage):
+        path = Path(self._tmp.name) / f"bild-{time.time_ns()}.png"
+        if img.save(str(path), "PNG"):
+            self.images.append(path); self._show_images()
+
+    def clear_images(self):
+        self.images.clear(); self._show_images()
+
+    def _show_images(self):
+        n = len(self.images)
+        self.attach.setVisible(bool(n))
+        self.attach.setText(f"🖼 {n} Bild{'er' if n > 1 else ''} angehängt   ✕")
+
     # --- Senden ------------------------------------------------------------------------------
     def send(self):
         text = self.input.toPlainText().strip()
-        if not text or self.claude.running or not backend.available():
+        if not (text or self.images) or self.claude.running or not backend.available():
             return
-        self.input.clear()
-        self._add("> **Du:** " + text.replace("\n", "\n> "))
+        images = list(self.images)
+        text = text or "Sieh dir das angehängte Bild an."
+        self.input.clear(); self.clear_images()
+        self._add("> **Du:** " + text.replace("\n", "\n> ") + (f"\n>\n> *🖼 {len(images)} Bild{'er' if len(images) > 1 else ''} angehängt*" if images else ""))
         prompt = text
         path, sel = self.active_file()
         if self.ctx.isChecked() and path:
@@ -112,7 +147,7 @@ class ChatPanel(QWidget):
             prompt = f"[Aktive Datei im Editor: {rel}]\n" + (f"[Markierter Text:\n{sel[:4000]}\n]\n" if sel else "") + "\n" + text
         self._busy(True)
         self.runStarting.emit()
-        self.claude.run(prompt, self.root, session=self.session, allow_bash=self.bash.isChecked(), system=SYSTEM_CHAT, max_turns=40)
+        self.claude.run(prompt, self.root, session=self.session, allow_bash=self.bash.isChecked(), system=SYSTEM_CHAT, max_turns=40, images=images)
 
     def _finished(self, ok, result, session):
         if session:

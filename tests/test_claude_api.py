@@ -288,3 +288,22 @@ def test_auto_provider_prefers_claude_code_then_api(qapp, monkeypatch):
         assert backend.provider() == "cli" and not backend.available() and "Weder Claude Code" in backend.unavailable_message()
     finally:
         keystore.clear(); options.set("claude/provider", "auto")
+
+
+def test_pasted_image_goes_to_the_api_as_an_image_block(fake, pump, tmp_path, qapp):
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtGui import QColor, QImage
+    from vds.docks.chat import ChatPanel
+    f = fake([sse([("text", "Ich sehe ein Bild")])])
+    chat = ChatPanel(); chat.set_root(tmp_path)
+    img = QImage(8, 8, QImage.Format_RGB32); img.fill(QColor("red"))
+    md = QMimeData(); md.setImageData(img)
+    assert chat.input.canInsertFromMimeData(md)
+    chat.input.insertFromMimeData(md)
+    assert len(chat.images) == 1 and chat.attach.isVisibleTo(chat)
+    chat.input.setPlainText("Was ist das?"); chat.send()
+    assert pump(lambda: bool(f.requests), 30) and pump(lambda: not chat.claude.running, 30)
+    content = f.requests[0]["messages"][0]["content"]
+    assert [b["type"] for b in content] == ["image", "text"] and content[1]["text"].endswith("Was ist das?")
+    assert content[0]["source"]["media_type"] == "image/png" and content[0]["source"]["data"]
+    assert chat.images == [] and chat.attach.isHidden()
