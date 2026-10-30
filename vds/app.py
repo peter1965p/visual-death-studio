@@ -10,7 +10,7 @@ import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication im
 
 from PySide6.QtCore import QCoreApplication, QSettings, QStandardPaths, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
-from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
                                QFrame, QScrollArea, QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
@@ -32,6 +32,7 @@ from .debug.controller import DebugController
 from .ai.completion import MODELS, AiCompletion
 from .lsp.manager import LspManager
 from .project import ProjectSettings
+from .projects import exporter, importer
 from .docks.references import ReferencesPanel
 from . import refactor
 from .docks.chat import ChatPanel
@@ -246,6 +247,8 @@ class MainWindow(QMainWindow):
             newproject=A("Projekt…", self.new_project, "Ctrl+Shift+N", "solution", "#b44cff"),
             viewcode=A("Code anzeigen", self.view_code, "F7"), viewdesigner=A("Designer anzeigen", self.view_designer, "Shift+F7"),
             openfolder=A("Ordner öffnen…", self.open_folder, "Ctrl+Shift+O", "folder"),
+            exportproj=A("Projekt exportieren… (Qt Creator, Visual Studio, VS Code, ZIP)", self.export_project, "Ctrl+Alt+E"),
+            importproj=A("Projekt importieren… (Qt Creator, Visual Studio …)", self.import_project, "Ctrl+Alt+I"),
             closefolder=A("Ordner schließen", self.close_folder),
             save=A("Speichern", self.save, "Ctrl+S", "save"),
             saveall=A("Alle speichern", self.save_all, "Ctrl+Shift+S", "save"),
@@ -332,7 +335,7 @@ class MainWindow(QMainWindow):
                 else:
                     m.addAction(it)
             return m
-        datei = menu("&Datei", ["NEU", a["openfolder"], a["closefolder"], None, a["startpage"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
+        datei = menu("&Datei", ["NEU", a["openfolder"], a["importproj"], a["exportproj"], a["closefolder"], None, a["startpage"], None, a["close"], a["save"], a["saveall"], None, a["exit"]])
         self.m_recent = QMenu("Zuletzt geöffnete Projekte", datei)
         self.m_recent.aboutToShow.connect(self._fill_recent)
         datei.insertMenu(a["startpage"], self.m_recent)
@@ -732,6 +735,67 @@ class MainWindow(QMainWindow):
             if self.docs.close_all():
                 self.set_root(Path(p))
                 self._restore_session()
+
+    def import_project(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Projekt importieren", str(self.root), importer.FILE_FILTER)
+        if p:
+            self.import_project_path(Path(p))
+
+    def import_project_path(self, path: Path) -> bool:
+        """Öffnet das Projekt in seinem Ordner und trägt Build-/Start-Befehl ein (siehe vds/projects/importer.py)."""
+        try:
+            imp = importer.import_project(path)
+        except importer.ProjectImportError as e:
+            QMessageBox.warning(self, "Projekt importieren", str(e))
+            return False
+        self._save_session()
+        if not self.docs.close_all():
+            return False
+        imp.apply()
+        self.set_root(imp.root)
+        self._restore_session()
+        self.d_output.show(); self.d_output.raise_()
+        self.output.append(f"Projekt importiert: {imp.kind} ({imp.source.name if imp.source else imp.root.name})\n", "info")
+        for n in imp.notes:
+            self.output.append(f"  • {n}\n", "info")
+        if imp.build_cmd:
+            self.output.append(f"  Build: {imp.build_cmd}\n", "info")
+        if imp.run_cmd:
+            self.output.append("  F5 baut und startet das Programm.\n", "info")
+        self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
+        return True
+
+    def export_project(self):
+        if self.root == empty_root():
+            return QMessageBox.information(self, "Projekt exportieren", "Öffne zuerst einen Projektordner.")
+        names = list(exporter.TARGETS.values())
+        choice, ok = QInputDialog.getItem(self, "Projekt exportieren", "Exportieren für:", names, 0, False)
+        if not ok:
+            return
+        target = next(k for k, v in exporter.TARGETS.items() if v == choice)
+        dest = None
+        if target == "zip":
+            p, _ = QFileDialog.getSaveFileName(self, "ZIP speichern", str(self.root.parent / f"{self.root.name}.zip"), "ZIP-Archiv (*.zip)")
+            if not p:
+                return
+            dest = Path(p)
+        self.export_project_to(target, dest)
+
+    def export_project_to(self, target: str, dest: Path | None = None) -> bool:
+        self.docs.save_all()
+        try:
+            res = exporter.export_project(self.root, target, dest)
+        except exporter.ProjectExportError as e:
+            QMessageBox.warning(self, "Projekt exportieren", str(e))
+            return False
+        self.d_output.show(); self.d_output.raise_()
+        self.output.append(f"Export ({exporter.TARGETS[target]}):\n", "info")
+        for f in res.files:
+            self.output.append(f"  + {f}\n", "info")
+        for n in res.notes:
+            self.output.append(f"  • {n}\n", "info")
+        self.statusBar().showMessage("Export fertig – Einzelheiten im Ausgabefenster", 6000)
+        return True
 
     def close_folder(self):
         """Schließt den Projektordner komplett: Dokumente, Dev-Server und Debugger werden beendet, beim nächsten Start bleibt die IDE ohne Ordner."""

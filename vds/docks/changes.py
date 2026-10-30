@@ -1,9 +1,10 @@
 """Änderungen-Panel: Tab „Claude“ (Review der KI-Änderungen mit Behalten/Zurücksetzen) und Tab „Git“ (Status, Stage, Commit)."""
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+from PySide6.QtWidgets import (QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from ..diff import changes as C
@@ -26,6 +27,8 @@ class ChangesPanel(QWidget):
     diffRequested = Signal(object)        # DiffRequest
     filesChanged = Signal()               # Dateien auf der Platte wurden verändert (Editor neu laden)
     pendingChanged = Signal(int)          # Anzahl offener Claude-Änderungen
+    _net_result = Signal(str, int, str)   # Push/Pull-Thread -> Oberfläche
+    net_done = Signal(str, int, str)      # (push|pull, Rückgabecode, Meldung)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,6 +36,7 @@ class ChangesPanel(QWidget):
         self.snapshot: dict | None = None
         self.claude_changes: list = []
         self.top: Path | None = None
+        self._net_result.connect(self._net_finished)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_claude(), "Claude")
         self.tabs.addTab(self._build_git(), "Git")
@@ -146,22 +150,29 @@ class ChangesPanel(QWidget):
         for b in (self.b_refresh, self.b_stage, self.b_unstage):
             r1.addWidget(b)
         self.b_commit = QPushButton("Commit"); self.b_commit.clicked.connect(self._commit)
+        r2 = QHBoxLayout()
+        self.b_push, self.b_pull, self.b_remote = QPushButton("Push"), QPushButton("Pull"), QPushButton("Remote…")
+        self.b_push.clicked.connect(lambda: self._net("push")); self.b_pull.clicked.connect(lambda: self._net("pull"))
+        self.b_remote.clicked.connect(self._set_remote)
+        for b in (self.b_push, self.b_pull, self.b_remote):
+            r2.addWidget(b)
         self.b_init = QPushButton("Repository initialisieren"); self.b_init.clicked.connect(self._init)
-        lay.addWidget(self.g_info); lay.addWidget(self.g_list, 1); lay.addLayout(r1); lay.addWidget(self.g_msg); lay.addWidget(self.b_commit); lay.addWidget(self.b_init)
+        lay.addWidget(self.g_info); lay.addWidget(self.g_list, 1); lay.addLayout(r1); lay.addWidget(self.g_msg); lay.addWidget(self.b_commit); lay.addLayout(r2); lay.addWidget(self.b_init)
         return w
 
     def refresh_git(self):
         self.top = C.toplevel(self.root) if self.root.exists() else None
         self.g_list.clear()
         has = self.top is not None
-        for w in (self.g_list, self.g_msg, self.b_stage, self.b_unstage, self.b_commit):
+        for w in (self.g_list, self.g_msg, self.b_stage, self.b_unstage, self.b_commit, self.b_push, self.b_pull, self.b_remote):
             w.setVisible(has)
         self.b_init.setVisible(not has)
         if not has:
             self.g_info.setText("Dieser Ordner ist kein Git-Repository.")
             return
         entries = C.status(self.top)
-        self.g_info.setText(f"Branch: {C.branch(self.top)}   ·   {len(entries)} Änderung(en)")
+        rem = C.remotes(self.top)
+        self.g_info.setText(f"Branch: {C.branch(self.top)}   ·   {len(entries)} Änderung(en)   ·   Remote: {next(iter(rem.values())) if rem else 'keines'}")
         for e in entries:
             it = QListWidgetItem(f"{e.label}   {e.rel}")
             it.setForeground(QColor("#3dffa1" if e.staged and not e.unstaged else STATUS_COLOR.get(e.x if e.x != " " else e.y, "#ffc474")))
@@ -203,6 +214,41 @@ class ChangesPanel(QWidget):
         if rc:
             return QMessageBox.warning(self, "Commit", out.strip() or "Commit fehlgeschlagen (nichts gestaged?).")
         self.g_msg.clear(); self.refresh_git()
+
+    def _set_remote(self) -> bool:
+        cur = next(iter(C.remotes(self.top).values()), "")
+        url, ok = QInputDialog.getText(self, "Remote", "Adresse des Repositorys (z. B. git@github.com:name/projekt.git):", text=cur)
+        if not ok or not url.strip():
+            return False
+        rc, out = C.git(self.top, "remote", "set-url", "origin", url.strip()) if C.remotes(self.top) else C.add_remote(self.top, url)
+        if rc:
+            QMessageBox.warning(self, "Remote", out.strip())
+            return False
+        self.refresh_git()
+        return True
+
+    def _net(self, op):
+        """Push/Pull im Hintergrund, damit die Oberfläche nicht einfriert; das Ergebnis meldet net_done."""
+        if op == "push" and not C.remotes(self.top) and not self._set_remote():
+            return
+        for b in (self.b_push, self.b_pull):
+            b.setEnabled(False)
+        self.g_info.setText(("Push" if op == "push" else "Pull") + " läuft …")
+        top = self.top
+
+        def work():
+            self._net_result.emit(op, *(C.push(top) if op == "push" else C.pull(top)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _net_finished(self, op, rc, out):
+        for b in (self.b_push, self.b_pull):
+            b.setEnabled(True)
+        self.refresh_git()
+        self.net_done.emit(op, rc, out)
+        if rc:
+            QMessageBox.warning(self, "Push" if op == "push" else "Pull", out)
+        if op == "pull" and not rc:
+            self.filesChanged.emit()
 
     def _init(self):
         rc, out = C.git(self.root, "init", "-q")

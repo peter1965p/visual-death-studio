@@ -77,9 +77,9 @@ class GitEntry:
         return "??" if self.x == "?" else (self.x + self.y).replace(" ", "·")
 
 
-def git(cwd: Path, *args, check=False):
+def git(cwd: Path, *args, check=False, timeout=30, env=None):
     try:
-        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
     return r.returncode, (r.stdout if r.returncode == 0 else (r.stderr or r.stdout))
@@ -149,3 +149,51 @@ def discard(top, entries):
 
 def commit(top, msg):
     return git(top, "commit", "-m", msg)
+
+
+def remotes(top: Path) -> dict:
+    """{Name: URL} der konfigurierten Remotes."""
+    rc, out = git(top, "remote", "-v")
+    found = {}
+    for line in out.splitlines() if rc == 0 else []:
+        parts = line.split()
+        if len(parts) >= 2:
+            found.setdefault(parts[0], parts[1])
+    return found
+
+
+def add_remote(top: Path, url: str, name: str = "origin"):
+    return git(top, "remote", "add", name, url.strip())
+
+
+def upstream(top: Path) -> str:
+    rc, out = git(top, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    return out.strip() if rc == 0 else ""
+
+
+def _net_env():
+    import os
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true", "SSH_ASKPASS": "true"}      # nie auf eine Passwort-Eingabe warten
+
+
+def _explain(out: str) -> str:
+    low = out.lower()
+    if any(k in low for k in ("authentication failed", "permission denied", "could not read username", "terminal prompts disabled", "403")):
+        return out.strip() + ("\n\nAnmeldung fehlgeschlagen: Hinterlege einen SSH-Schlüssel oder einen Credential-Helper "
+                              "(z. B. `gh auth login` und `gh auth setup-git`), dann erneut versuchen.")
+    return out.strip()
+
+
+def push(top: Path):
+    """Push des aktuellen Branches; ohne Upstream wird er mit -u auf das erste Remote gesetzt."""
+    rem = remotes(top)
+    if not rem:
+        return 1, "Kein Remote eingetragen."
+    args = ["push"] if upstream(top) else ["push", "-u", "origin" if "origin" in rem else next(iter(rem)), "HEAD"]
+    rc, out = git(top, *args, timeout=180, env=_net_env())
+    return rc, _explain(out) if rc else (out.strip() or "Push erledigt.")
+
+
+def pull(top: Path):
+    rc, out = git(top, "pull", "--ff-only", timeout=180, env=_net_env())
+    return rc, _explain(out) if rc else (out.strip() or "Bereits aktuell.")

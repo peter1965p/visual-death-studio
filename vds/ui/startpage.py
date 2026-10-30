@@ -55,7 +55,7 @@ def project_kind(path: Path) -> tuple:
         return ".NET", "csharp"
     if has("pom.xml", "build.gradle", "build.gradle.kts") or any(path.glob("*.java")):
         return "Java", "java"
-    if has("CMakeLists.txt", "Makefile") or any(path.glob("*.c")) or any(path.glob("*.cpp")):
+    if has("CMakeLists.txt", "Makefile") or any(path.glob("*.c")) or any(path.glob("*.cpp")) or any(path.glob("*.pro")) or any(path.glob("*.vcxproj")):
         return "C/C++", "cpp"
     if has("pyproject.toml", "requirements.txt", "setup.py") or any(path.glob("*.py")):
         return "Python", "python"
