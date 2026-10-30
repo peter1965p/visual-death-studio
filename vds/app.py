@@ -42,6 +42,7 @@ from .docks.output import ErrorList, OutputPane
 from .docks.tests import TestExplorer
 from .testing.service import TestService
 from .docks.packages import PackagePanel
+from .docks.profiler import ProfilerPanel
 from .docks.props import PropertiesDock
 from .docks.terminal import TerminalWidget
 from .docks.tools import Breakpoints, Toolbox
@@ -192,6 +193,8 @@ class MainWindow(QMainWindow):
         self.d_terminal = self._dock("Terminal", self.terminal, B, "terminal")
         self.d_bps = self._dock("Haltepunkte", self.bps, B, "bps")
         self.d_packages = self._dock("Pakete", self.packages, B, "packages")
+        self.profiler = ProfilerPanel()
+        self.d_profiler = self._dock("Profiler", self.profiler, B, "profiler")
         self.p_locals, self.p_watch, self.p_stack, self.p_imm = VariablesTree(), WatchPanel(), CallStackPanel(), ImmediatePanel()
         self.p_tests = TestExplorer(self.tests)
         self.p_refs = ReferencesPanel()
@@ -201,14 +204,14 @@ class MainWindow(QMainWindow):
         self.d_watch = self._dock("Überwachung", self.p_watch, B, "watch")
         self.d_stack = self._dock("Aufrufliste", self.p_stack, B, "stack")
         self.d_imm = self._dock("Direktfenster", self.p_imm, B, "immediate")
-        for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
+        for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_profiler, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
             self.tabifyDockWidget(self.d_output, d)
         self.d_output.raise_()
         self.resizeDocks([self.d_explorer], [280], Qt.Horizontal)
         self.resizeDocks([self.d_chat], [360], Qt.Horizontal)
         self.resizeDocks([self.d_chat, self.d_props], [520, 260], Qt.Vertical)
         self.resizeDocks([self.d_output], [230], Qt.Vertical)
-        self.all_docks = [self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
+        self.all_docks = [self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
         QApplication.instance().focusChanged.connect(self._focus_changed)
 
     def _focus_changed(self, _old, new):
@@ -253,6 +256,7 @@ class MainWindow(QMainWindow):
             palcmd=A("Befehle suchen…", lambda: self.show_palette(">"), "Ctrl+Shift+P"),
             palfile=A("Datei öffnen (Schnellsuche)…", lambda: self.show_palette(), "Ctrl+P"),
             palgrep=A("In Dateien suchen…", lambda: self.show_palette("%"), "Ctrl+Shift+F"),
+            profile=A("Profiler starten (CPU / Speicher)", self.start_profiler, "Alt+F2"),
             importproj=A("Projekt importieren… (Qt Creator, Visual Studio …)", self.import_project, "Ctrl+Alt+I"),
             closefolder=A("Ordner schließen", self.close_folder),
             save=A("Speichern", self.save, "Ctrl+S", "save"),
@@ -359,7 +363,7 @@ class MainWindow(QMainWindow):
                           a["showfolder"], a["projprops"]])
         menu("&Erstellen", [a["build"], a["rebuild"], a["clean"], a["cancelbuild"], None, a["compilefile"]])
         menu("&Test", [a["testexp"], None, a["testall"], a["testfailed"], a["testdiscover"], a["testcancel"]])
-        menu("&Debuggen", [a["start"], a["startnd"], a["dpause"], a["stop"], a["drestart"], None, a["stepin"], a["stepover"], a["stepout"], None, a["togglebp"], a["clearbp"]])
+        menu("&Debuggen", [a["start"], a["startnd"], a["dpause"], a["stop"], a["drestart"], None, a["stepin"], a["stepover"], a["stepout"], None, a["togglebp"], a["clearbp"], None, a["profile"]])
         t = menu("E&xtras", [])
         t.addAction(a["options"])
         t.addSeparator()
@@ -434,6 +438,9 @@ class MainWindow(QMainWindow):
         self.dbg.moduleMissing.connect(self._debug_module_missing)
         self.p_tests.jumpTo.connect(lambda p, l: self.goto(p, l, 1))
         self.p_tests.debugRequested.connect(lambda fw, ids: self.dbg.debug_test(fw, ids, self.root))
+        self.profiler.jumpTo.connect(lambda f, l: self.goto(f, l, 1))
+        self.profiler.log.connect(lambda t: self.output.append(t, "stderr"))
+        self.profiler.btn.clicked.connect(self.start_profiler)
         self.tests.log.connect(lambda t: self.output.append(t, "info"))
         self.docs.docOpened.connect(self._code_opened)
         self.docs.docClosed.connect(lambda d: d.kind == "code" and self.lsp.detach(d.path))
@@ -717,6 +724,7 @@ class MainWindow(QMainWindow):
         self.tests.set_root(path, self.runner.interpreter(path / "x.py"))
         QTimer.singleShot(1500, self.tests.discover)
         self.explorer.set_root(path)
+        self.profiler.set_root(path)
         closed = path == empty_root()
         self.d_explorer.setWindowTitle("Projektmappen-Explorer – kein Ordner" if closed else f"Projektmappen-Explorer – {path.name}")
         self.runner.build_dir = path / ".vds" / "bin"
@@ -769,6 +777,20 @@ class MainWindow(QMainWindow):
             self.output.append("  F5 baut und startet das Programm.\n", "info")
         self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
         return True
+
+    def start_profiler(self):
+        """Misst die Startdatei des Projekts bzw. die aktive Python-Datei."""
+        doc = self.docs.current_doc()
+        script = self.project.startup_path(self.root)
+        if doc and doc.kind != "diff" and doc.run_target and doc.run_target.suffix == ".py":
+            script = doc.run_target
+        self.d_profiler.show(); self.d_profiler.raise_()
+        if script is None or script.suffix != ".py":
+            self.profiler.info.setText("Der Profiler misst Python-Skripte: öffne eine .py-Datei oder lege unter Projekt → Eigenschaften eine Startdatei fest.")
+            return False
+        self.docs.save_all()
+        self.profiler.interpreter = lambda: self.runner.interpreter(script)
+        return self.profiler.start(script, self.project.arg_list())
 
     def show_palette(self, prefix: str = ""):
         if not hasattr(self, "_palette"):
