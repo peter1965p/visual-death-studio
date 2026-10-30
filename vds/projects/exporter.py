@@ -15,6 +15,8 @@ TARGETS = {
     "qtcreator": "Qt Creator (CMakeLists.txt bzw. .pyproject)",
     "visualstudio": "Visual Studio (.sln bzw. CMake-Ordner)",
     "vscode": "VS Code (tasks.json, launch.json)",
+    "intellij": "IntelliJ IDEA / PyCharm / CLion (.idea, .iml)",
+    "eclipse": "Eclipse (.project, .classpath)",
     "zip": "ZIP-Archiv ohne Build- und Umgebungsordner",
 }
 SKIP_DIRS = {".vds", ".git", "venv", ".venv", "node_modules", "__pycache__", "build", "bin", "obj", "target", "dist", ".idea", ".vs", ".gradle", "vendor", "out"}
@@ -68,6 +70,10 @@ def export_project(root: Path, target: str, dest: Path | None = None) -> Exporte
         return _visualstudio(root, res)
     if target == "vscode":
         return _vscode(root, res)
+    if target == "intellij":
+        return _intellij(root, res)
+    if target == "eclipse":
+        return _eclipse(root, res)
     raise ProjectExportError(f"Unbekanntes Exportziel: {target}")
 
 
@@ -176,6 +182,48 @@ def _vscode(root: Path, res: Exported) -> Exported:
         _write(root / ".vscode" / "tasks.json", json.dumps({"version": "2.0.0", "tasks": tasks}, indent=2, ensure_ascii=False) + "\n", res)
     if launch:
         _write(root / ".vscode" / "launch.json", json.dumps({"version": "0.2.0", "configurations": launch}, indent=2, ensure_ascii=False) + "\n", res)
+    return res
+
+
+def _java_src(root: Path) -> list:
+    for cand in ("src/main/java", "src"):
+        if (root / cand).is_dir() and any((root / cand).rglob("*.java")):
+            return [cand]
+    return ["."] if any(p.suffix == ".java" for p in root.glob("*.java")) else []
+
+
+def _intellij(root: Path, res: Exported) -> Exported:
+    name = _name(root)
+    java, py = _java_src(root), bool(_walk(root, (".py",)))
+    if not java and not py:
+        raise ProjectExportError("Für IntelliJ-Produkte braucht das Projekt Java- oder Python-Dateien.")
+    mtype = "JAVA_MODULE" if java else "PYTHON_MODULE"
+    src = "".join(f'      <sourceFolder url="file://$MODULE_DIR$/{d}" isTestSource="false" />\n' for d in java)
+    excl = "".join(f'      <excludeFolder url="file://$MODULE_DIR$/{d}" />\n' for d in (".vds", "venv", ".venv", "build", "node_modules") if (root / d).is_dir())
+    iml = (f'<?xml version="1.0" encoding="UTF-8"?>\n<module type="{mtype}" version="4">\n  <component name="NewModuleRootManager" inherit-compiler-output="true">\n'
+           f'    <exclude-output />\n    <content url="file://$MODULE_DIR$">\n{src}{excl}    </content>\n    <orderEntry type="inheritedJdk" />\n    <orderEntry type="sourceFolder" forTests="false" />\n  </component>\n</module>\n')
+    modules = (f'<?xml version="1.0" encoding="UTF-8"?>\n<project version="4">\n  <component name="ProjectModuleManager">\n    <modules>\n'
+               f'      <module fileurl="file://$PROJECT_DIR$/{name}.iml" filepath="$PROJECT_DIR$/{name}.iml" />\n    </modules>\n  </component>\n</project>\n')
+    _write(root / f"{name}.iml", iml, res)
+    _write(root / ".idea" / "modules.xml", modules, res)
+    res.notes.append("In IntelliJ-Produkten den Ordner öffnen; das SDK bzw. den Interpreter wählt die IDE beim ersten Öffnen.")
+    return res
+
+
+def _eclipse(root: Path, res: Exported) -> Exported:
+    java = _java_src(root)
+    if not java:
+        raise ProjectExportError("Für Eclipse braucht das Projekt Java-Quellen.")
+    name = _name(root)
+    project = (f'<?xml version="1.0" encoding="UTF-8"?>\n<projectDescription>\n\t<name>{name}</name>\n\t<comment></comment>\n\t<projects></projects>\n'
+               '\t<buildSpec>\n\t\t<buildCommand>\n\t\t\t<name>org.eclipse.jdt.core.javabuilder</name>\n\t\t\t<arguments></arguments>\n\t\t</buildCommand>\n\t</buildSpec>\n'
+               '\t<natures>\n\t\t<nature>org.eclipse.jdt.core.javanature</nature>\n\t</natures>\n</projectDescription>\n')
+    entries = "".join(f'\t<classpathentry kind="src" path="{d}"/>\n' for d in java)
+    cp = ('<?xml version="1.0" encoding="UTF-8"?>\n<classpath>\n' + entries +
+          '\t<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>\n\t<classpathentry kind="output" path="bin"/>\n</classpath>\n')
+    _write(root / ".project", project, res)
+    _write(root / ".classpath", cp, res)
+    res.notes.append("In Eclipse: Datei → Importieren → Vorhandene Projekte in den Arbeitsbereich.")
     return res
 
 

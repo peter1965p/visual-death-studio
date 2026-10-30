@@ -115,3 +115,17 @@ def test_changes_panel_pushes_in_background(qapp, repos, pump):
         assert got == [("push", 0)] and C.upstream(a) == "origin/main"
     finally:
         win.docs.close_all(); win.preview.shutdown(); win.close()
+
+
+def test_intellij_and_eclipse_export_roundtrip_through_the_importer(tmp_path):
+    w(tmp_path, "src/demo/App.java", "package demo;\npublic class App { public static void main(String[] a) {} }\n")
+    exporter.export_project(tmp_path, "intellij"); exporter.export_project(tmp_path, "eclipse")
+    assert (tmp_path / ".idea/modules.xml").exists() and (tmp_path / ".project").exists()
+    iml = next(tmp_path.glob("*.iml"))
+    assert importer.import_project(iml).run_cmd.endswith("demo.App")
+    assert importer.import_project(tmp_path / ".project").run_cmd.endswith("demo.App")
+    py = tmp_path.parent / "pyproj"; py.mkdir(); (py / "main.py").write_text("x")
+    exporter.export_project(py, "intellij")
+    assert 'type="PYTHON_MODULE"' in next(py.glob("*.iml")).read_text()
+    with pytest.raises(exporter.ProjectExportError):
+        exporter.export_project(py, "eclipse")

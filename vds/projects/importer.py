@@ -12,8 +12,8 @@ from pathlib import Path
 from ..project import ProjectSettings
 
 # Reihenfolge = Vorrang bei der Suche in einem Ordner
-PATTERNS = ("*.sln", "*.pro", "CMakeLists.txt", "*.csproj", "*.fsproj", "*.vbproj", "*.vcxproj", "*.cbp", "pom.xml", "build.gradle", "build.gradle.kts")
-FILE_FILTER = "Projekte (*.sln *.pro *.csproj *.fsproj *.vbproj *.vcxproj *.cbp CMakeLists.txt pom.xml build.gradle build.gradle.kts);;Alle Dateien (*)"
+PATTERNS = ("*.sln", "*.pro", "CMakeLists.txt", "Package.swift", "*.csproj", "*.fsproj", "*.vbproj", "*.vcxproj", "*.cbp", "pom.xml", "build.gradle", "build.gradle.kts", "*.iml", ".project", "*.xcodeproj")
+FILE_FILTER = "Projekte (*.sln *.pro Package.swift *.xcodeproj *.iml .project *.csproj *.fsproj *.vbproj *.vcxproj *.cbp CMakeLists.txt pom.xml build.gradle build.gradle.kts);;Alle Dateien (*)"
 SLN_FOLDER = "{2150E333-8FDC-42A3-9474-1A3956D46DE8}"      # Projektmappen-Ordner, kein echtes Projekt
 IGNORED_DEFINES = {"WIN32", "_WINDOWS", "_CONSOLE", "_DEBUG", "NDEBUG", "_UNICODE", "UNICODE"}
 GEN = Path(".vds") / "import"
@@ -47,7 +47,7 @@ class Imported:
 def find_project(path: Path) -> Path:
     """Projektdatei zu einer Datei oder einem Ordner; ein Ordner wird nach bekannten Projektdateien durchsucht."""
     path = Path(path)
-    if path.is_file():
+    if path.is_file() or path.suffix == ".xcodeproj":       # .xcodeproj ist ein Ordner
         return path
     if not path.is_dir():
         raise ProjectImportError(f"{path} gibt es nicht.")
@@ -55,7 +55,7 @@ def find_project(path: Path) -> Path:
         hits = sorted(path.glob(pat))
         if hits:
             return hits[0]
-    raise ProjectImportError(f"In {path.name} wurde keine Projektdatei gefunden (.sln, .pro, CMakeLists.txt, .csproj, .vcxproj, .cbp, pom.xml, build.gradle).")
+    raise ProjectImportError(f"In {path.name} wurde keine Projektdatei gefunden (.sln, .pro, CMakeLists.txt, .csproj, .vcxproj, .cbp, .iml, .project, Package.swift, pom.xml, build.gradle).")
 
 
 def import_project(path: Path) -> Imported:
@@ -73,6 +73,14 @@ def import_project(path: Path) -> Imported:
         return _vcxproj(f)
     if n.endswith(".cbp"):
         return _codeblocks(f)
+    if n == "package.swift":
+        return Imported(f.parent, "Swift Package", _ide_notes(f.parent), "swift build", "swift package clean", "swift run", f)
+    if n.endswith(".xcodeproj"):
+        return _xcode(f)
+    if n.endswith(".iml"):
+        return _java_ide(f.parent, "IntelliJ IDEA", f, _iml_sources(f))
+    if n == ".project":
+        return _java_ide(f.parent, "Eclipse", f, _eclipse_sources(f.parent))
     if n == "pom.xml":
         return Imported(f.parent, "Maven", _ide_notes(f.parent), source=f)
     if n.startswith("build.gradle"):
@@ -288,6 +296,57 @@ def _vcxproj(f: Path) -> Imported:
     info = _vcx_info(f)
     notes = _ide_notes(f.parent) + ["C++-Projekt (.vcxproj) wird über eine abgeleitete CMake-Datei gebaut; MSVC-spezifische Einstellungen und Windows-APIs werden nicht übernommen."]
     return _generated_multi(f.parent, "Visual Studio (C++)", notes, [info], f)
+
+
+# --- Java-IDEs (IntelliJ, Eclipse), Xcode, Swift -------------------------------------------------------------
+def _iml_sources(f: Path) -> list:
+    return [m.replace("file://$MODULE_DIR$/", "").strip("/") for m in re.findall(r'<sourceFolder\s+url="([^"]+)"[^>]*isTestSource="false"', f.read_text(encoding="utf-8", errors="replace"))]
+
+
+def _eclipse_sources(root: Path) -> list:
+    cp = root / ".classpath"
+    if not cp.is_file():
+        return []
+    return [e.get("path", "") for e in _children(_xml(cp), "classpathentry") if e.get("kind") == "src" and e.get("path") and not e.get("path", "").startswith("/")]
+
+
+def _java_main(root: Path, srcdirs: list) -> str:
+    """Vollständiger Klassenname der ersten Klasse mit main-Methode."""
+    for d in srcdirs:
+        base = root / d
+        for p in sorted(base.rglob("*.java")):
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"static\s+void\s+main\s*\(", text):
+                pkg = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.M)
+                return (pkg.group(1) + "." if pkg else "") + p.stem
+    return ""
+
+
+def _java_ide(root: Path, kind: str, src: Path, srcdirs: list) -> Imported:
+    notes = _ide_notes(root)
+    if (root / "pom.xml").exists() or (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
+        notes.append("Maven/Gradle-Build gefunden – Erstellen nutzt dieses Build-System.")
+        return Imported(root, kind, notes, source=src)
+    srcdirs = [d for d in srcdirs if (root / d).is_dir()] or [d for d in ("src", "src/main/java") if (root / d).is_dir()]
+    if not srcdirs:
+        raise ProjectImportError(f"In {root.name} wurde kein Java-Quellordner gefunden.")
+    out = ".vds/bin"
+    srcs = " ".join(f"$(find {_q(d)} -name '*.java')" for d in srcdirs)
+    build = f"mkdir -p {out} && javac -d {out} {srcs}"
+    main = _java_main(root, srcdirs)
+    notes.append("Bibliotheken (Eclipse-/IntelliJ-Abhängigkeiten) werden nicht übernommen; bei Bedarf den Klassenpfad unter Projekt → Eigenschaften im Build-Befehl ergänzen.")
+    run = f"{build} && java -cp {out} {main}" if main else ""
+    if not main:
+        notes.append("Keine Klasse mit main-Methode gefunden – Startbefehl bitte unter Projekt → Eigenschaften eintragen.")
+    return Imported(root, kind, notes, build, f"rm -rf {out}", run, src)
+
+
+def _xcode(f: Path) -> Imported:
+    root = f.parent
+    notes = _ide_notes(root) + ["Xcode-Projekte (.xcodeproj) lassen sich nur unter macOS bauen: Der Ordner wird zum Bearbeiten geöffnet, Build- und Startbefehl entfallen."]
+    if (root / "Package.swift").is_file():
+        return Imported(root, "Swift Package", notes, "swift build", "swift package clean", "swift run", root / "Package.swift")
+    return Imported(root, "Xcode", notes, source=f)
 
 
 # --- Code::Blocks -------------------------------------------------------------------------------------------

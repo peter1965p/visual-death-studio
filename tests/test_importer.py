@@ -121,3 +121,32 @@ def test_main_window_imports_and_sets_project_commands(qapp, tmp_path):
         assert any("Projekt" in a.text() for a in win.menuBar().actions()[0].menu().actions())
     finally:
         win.docs.close_all(); win.preview.shutdown(); win.close()
+
+
+def test_swift_package_and_xcode(tmp_path):
+    w(tmp_path, "Package.swift", "// swift-tools-version:5.9")
+    r = importer.import_project(tmp_path)
+    assert r.kind == "Swift Package" and r.run_cmd == "swift run"
+    (tmp_path / "Package.swift").unlink()
+    x = tmp_path / "App.xcodeproj"; x.mkdir()
+    r = importer.import_project(x)
+    assert r.kind == "Xcode" and r.build_cmd == "" and "macOS" in r.notes[0]
+
+
+JAVA = "package demo;\npublic class App { public static void main(String[] a) { System.out.println(\"hi\"); } }\n"
+
+
+def test_intellij_and_eclipse_java_projects_build_with_javac(tmp_path):
+    import shutil
+    import subprocess
+    w(tmp_path, "src/demo/App.java", JAVA)
+    w(tmp_path, "p.iml", '<module><component><content url="file://$MODULE_DIR$"><sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" /></content></component></module>')
+    r = importer.import_project(tmp_path / "p.iml")
+    assert r.kind == "IntelliJ IDEA" and r.run_cmd.endswith("java -cp .vds/bin demo.App")
+    (tmp_path / "p.iml").unlink()
+    w(tmp_path, ".classpath", '<classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="X"/></classpath>')
+    r = importer.import_project(w(tmp_path, ".project", "<projectDescription/>"))
+    assert r.kind == "Eclipse" and r.build_cmd.startswith("mkdir -p .vds/bin && javac")
+    if shutil.which("javac") and shutil.which("java"):
+        out = subprocess.run(["bash", "-c", r.run_cmd], cwd=tmp_path, capture_output=True, text=True)
+        assert out.stdout.strip() == "hi", out.stderr
