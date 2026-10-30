@@ -42,6 +42,7 @@ from .docks.output import ErrorList, OutputPane
 from .docks.tests import TestExplorer
 from .testing.service import TestService
 from .docks.packages import PackagePanel
+from .docks.database import DB_SUFFIXES, Connection, DatabasePanel
 from .docks.profiler import ProfilerPanel
 from .docks.props import PropertiesDock
 from .docks.terminal import TerminalWidget
@@ -193,6 +194,8 @@ class MainWindow(QMainWindow):
         self.d_terminal = self._dock("Terminal", self.terminal, B, "terminal")
         self.d_bps = self._dock("Haltepunkte", self.bps, B, "bps")
         self.d_packages = self._dock("Pakete", self.packages, B, "packages")
+        self.dbpanel = DatabasePanel()
+        self.d_db = self._dock("Datenbank", self.dbpanel, B, "database")
         self.profiler = ProfilerPanel()
         self.d_profiler = self._dock("Profiler", self.profiler, B, "profiler")
         self.p_locals, self.p_watch, self.p_stack, self.p_imm = VariablesTree(), WatchPanel(), CallStackPanel(), ImmediatePanel()
@@ -204,14 +207,14 @@ class MainWindow(QMainWindow):
         self.d_watch = self._dock("Überwachung", self.p_watch, B, "watch")
         self.d_stack = self._dock("Aufrufliste", self.p_stack, B, "stack")
         self.d_imm = self._dock("Direktfenster", self.p_imm, B, "immediate")
-        for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_profiler, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
+        for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_profiler, self.d_db, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
             self.tabifyDockWidget(self.d_output, d)
         self.d_output.raise_()
         self.resizeDocks([self.d_explorer], [280], Qt.Horizontal)
         self.resizeDocks([self.d_chat], [360], Qt.Horizontal)
         self.resizeDocks([self.d_chat, self.d_props], [520, 260], Qt.Vertical)
         self.resizeDocks([self.d_output], [230], Qt.Vertical)
-        self.all_docks = [self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
+        self.all_docks = [self.d_db, self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
         QApplication.instance().focusChanged.connect(self._focus_changed)
 
     def _focus_changed(self, _old, new):
@@ -256,6 +259,7 @@ class MainWindow(QMainWindow):
             palcmd=A("Befehle suchen…", lambda: self.show_palette(">"), "Ctrl+Shift+P"),
             palfile=A("Datei öffnen (Schnellsuche)…", lambda: self.show_palette(), "Ctrl+P"),
             palgrep=A("In Dateien suchen…", lambda: self.show_palette("%"), "Ctrl+Shift+F"),
+            dbexp=A("Datenbank-Explorer", self.open_database, "Ctrl+Alt+B"),
             profile=A("Profiler starten (CPU / Speicher)", self.start_profiler, "Alt+F2"),
             importproj=A("Projekt importieren… (Qt Creator, Visual Studio …)", self.import_project, "Ctrl+Alt+I"),
             closefolder=A("Ordner schließen", self.close_folder),
@@ -368,6 +372,7 @@ class MainWindow(QMainWindow):
         t.addAction(a["options"])
         t.addSeparator()
         t.addAction(a["pkgs"])
+        t.addAction(a["dbexp"])
         t.addAction(a["editorfont"])
         t.addAction(a["askclaude"])
         t.addAction(a["aimodel"])
@@ -725,6 +730,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1500, self.tests.discover)
         self.explorer.set_root(path)
         self.profiler.set_root(path)
+        self.dbpanel.set_root(path)
         closed = path == empty_root()
         self.d_explorer.setWindowTitle("Projektmappen-Explorer – kein Ordner" if closed else f"Projektmappen-Explorer – {path.name}")
         self.runner.build_dir = path / ".vds" / "bin"
@@ -777,6 +783,11 @@ class MainWindow(QMainWindow):
             self.output.append("  F5 baut und startet das Programm.\n", "info")
         self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
         return True
+
+    def open_database(self, path: Path | None = None):
+        self.d_db.show(); self.d_db.raise_()
+        if path:
+            self.dbpanel.connect_to(Connection("", "QSQLITE", str(path)))
 
     def start_profiler(self):
         """Misst die Startdatei des Projekts bzw. die aktive Python-Datei."""
@@ -846,6 +857,8 @@ class MainWindow(QMainWindow):
     def _open_file(self, path: Path):
         """Wie in Visual Studio: Gehört zu Form1.py ein Formular (Form1.form.json), öffnet der Doppelklick den Designer.
         Den Code zeigt F7 (Ansicht → Code anzeigen)."""
+        if path.suffix.lower() in DB_SUFFIXES:
+            return self.open_database(path)
         form = path.with_name(path.stem + FORM_SUFFIX)
         if path.suffix in (".py", ".java", ".tsx", ".vue") and form.is_file():
             return self.docs.open(form)
