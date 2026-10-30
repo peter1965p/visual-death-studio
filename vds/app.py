@@ -19,6 +19,7 @@ from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
 from .ui import startpage
+from .ui.palette import CommandPalette
 from .web import devserver
 from .web.inspector import WebInspector
 from .web.panel import PreviewPanel
@@ -248,6 +249,10 @@ class MainWindow(QMainWindow):
             viewcode=A("Code anzeigen", self.view_code, "F7"), viewdesigner=A("Designer anzeigen", self.view_designer, "Shift+F7"),
             openfolder=A("Ordner öffnen…", self.open_folder, "Ctrl+Shift+O", "folder"),
             exportproj=A("Projekt exportieren… (Qt Creator, Visual Studio, VS Code, ZIP)", self.export_project, "Ctrl+Alt+E"),
+            palette=A("Befehlspalette / Suche…", lambda: self.show_palette(), "Ctrl+Q"),
+            palcmd=A("Befehle suchen…", lambda: self.show_palette(">"), "Ctrl+Shift+P"),
+            palfile=A("Datei öffnen (Schnellsuche)…", lambda: self.show_palette(), "Ctrl+P"),
+            palgrep=A("In Dateien suchen…", lambda: self.show_palette("%"), "Ctrl+Shift+F"),
             importproj=A("Projekt importieren… (Qt Creator, Visual Studio …)", self.import_project, "Ctrl+Alt+I"),
             closefolder=A("Ordner schließen", self.close_folder),
             save=A("Speichern", self.save, "Ctrl+S", "save"),
@@ -339,7 +344,7 @@ class MainWindow(QMainWindow):
         self.m_recent = QMenu("Zuletzt geöffnete Projekte", datei)
         self.m_recent.aboutToShow.connect(self._fill_recent)
         datei.insertMenu(a["startpage"], self.m_recent)
-        menu("&Bearbeiten", [a["undo"], a["redo"], None, a["cut"], a["copy"], a["paste"], None, a["selall"], None, a["find"], a["goto"], a["gotodef"], a["findrefs"], None, a["rename"], a["quickact"], a["fmtdoc"], a["comment"], None, a["aicomplete"]])
+        menu("&Bearbeiten", [a["palette"], a["palcmd"], a["palfile"], a["palgrep"], None, a["undo"], a["redo"], None, a["cut"], a["copy"], a["paste"], None, a["selall"], None, a["find"], a["goto"], a["gotodef"], a["findrefs"], None, a["rename"], a["quickact"], a["fmtdoc"], a["comment"], None, a["aicomplete"]])
         v = menu("&Ansicht", [])
         for d in self.all_docks:
             v.addAction(d.toggleViewAction())
@@ -764,6 +769,11 @@ class MainWindow(QMainWindow):
             self.output.append("  F5 baut und startet das Programm.\n", "info")
         self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
         return True
+
+    def show_palette(self, prefix: str = ""):
+        if not hasattr(self, "_palette"):
+            self._palette = CommandPalette(self)
+        self._palette.open(prefix)
 
     def export_project(self):
         if self.root == empty_root():
