@@ -20,6 +20,8 @@ from .build.runner import Runner
 from .docks.explorer import Explorer
 from .ui import startpage
 from .ui.palette import CommandPalette
+from .ui.share_dialog import ShareDialog
+from .share.session import ShareSession, write_files
 from .web import devserver
 from .web.inspector import WebInspector
 from .web.panel import PreviewPanel
@@ -259,6 +261,7 @@ class MainWindow(QMainWindow):
             palcmd=A("Befehle suchen…", lambda: self.show_palette(">"), "Ctrl+Shift+P"),
             palfile=A("Datei öffnen (Schnellsuche)…", lambda: self.show_palette(), "Ctrl+P"),
             palgrep=A("In Dateien suchen…", lambda: self.show_palette("%"), "Ctrl+Shift+F"),
+            liveshare=A("Live Share…", self.show_share, "Ctrl+Alt+J"),
             dbexp=A("Datenbank-Explorer", self.open_database, "Ctrl+Alt+B"),
             profile=A("Profiler starten (CPU / Speicher)", self.start_profiler, "Alt+F2"),
             importproj=A("Projekt importieren… (Qt Creator, Visual Studio …)", self.import_project, "Ctrl+Alt+I"),
@@ -373,6 +376,7 @@ class MainWindow(QMainWindow):
         t.addSeparator()
         t.addAction(a["pkgs"])
         t.addAction(a["dbexp"])
+        t.addAction(a["liveshare"])
         t.addAction(a["editorfont"])
         t.addAction(a["askclaude"])
         t.addAction(a["aimodel"])
@@ -443,6 +447,15 @@ class MainWindow(QMainWindow):
         self.dbg.moduleMissing.connect(self._debug_module_missing)
         self.p_tests.jumpTo.connect(lambda p, l: self.goto(p, l, 1))
         self.p_tests.debugRequested.connect(lambda fw, ids: self.dbg.debug_test(fw, ids, self.root))
+        self.share = ShareSession(self)
+        self._share_guard = False
+        self._share_timers: dict = {}
+        self.share.remoteEdit.connect(self._share_remote_edit)
+        self.share.welcome.connect(self._share_welcomed)
+        self.share.status.connect(lambda t: self.statusBar().showMessage("Live Share: " + t, 6000))
+        self.share.closed.connect(lambda: self.st_state.setText("Bereit"))
+        self.share.peersChanged.connect(lambda n: self.st_state.setText(f"Live Share: {', '.join(n)}" if n else "Live Share: wartet auf Gäste"))
+        self.docs.docOpened.connect(self._share_hook)
         self.profiler.jumpTo.connect(lambda f, l: self.goto(f, l, 1))
         self.profiler.log.connect(lambda t: self.output.append(t, "stderr"))
         self.profiler.btn.clicked.connect(self.start_profiler)
@@ -783,6 +796,70 @@ class MainWindow(QMainWindow):
             self.output.append("  F5 baut und startet das Programm.\n", "info")
         self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
         return True
+
+    # --- Live Share ---------------------------------------------------------------------
+    def show_share(self):
+        if not hasattr(self, "_share_dlg"):
+            self._share_dlg = ShareDialog(self)
+        self._share_dlg.show(); self._share_dlg.raise_()
+
+    def share_host(self, read_only=False):
+        self.docs.save_all()
+        self.share.host(self.root, read_only=read_only, name=self.settings.value("share/name", "Host"))
+        self.st_state.setText("Live Share: wartet auf Gäste")
+
+    def share_join(self, code: str, name: str, folder: Path):
+        self.share.join(code, name, folder)
+
+    def _share_welcomed(self, project: str, files: list):
+        folder = self.share.root / (project or "projekt")
+        write_files(folder, files)
+        self.share.root = folder
+        self.set_root(folder)
+        self.st_state.setText(f"Live Share: verbunden ({'nur lesen' if self.share.read_only else 'bearbeiten'})")
+        self.statusBar().showMessage(f"{len(files)} Datei(en) von {project} erhalten", 6000)
+
+    def _share_rel(self, path: Path) -> str | None:
+        try:
+            return Path(path).resolve().relative_to(self.share.root.resolve()).as_posix()
+        except ValueError:
+            return None
+
+    def _share_hook(self, doc):
+        """Lokale Änderungen eines Editors (leicht verzögert) an die Sitzung schicken."""
+        if doc.kind != "code":
+            return
+        ed = doc.view
+
+        def changed():
+            if self._share_guard or not self.share.active or (self.share.role == "guest" and self.share.read_only):
+                return
+            rel = self._share_rel(doc.path)
+            if rel is None:
+                return
+            t = self._share_timers.get(doc.path)
+            if t is None:
+                t = self._share_timers[doc.path] = QTimer(self, singleShot=True, interval=150)
+                t.timeout.connect(lambda: self.share.send_edit(self._share_rel(doc.path) or "", ed.toPlainText()))
+            t.start()
+        ed.document().contentsChanged.connect(changed)
+
+    def _share_remote_edit(self, rel: str, text: str, who: str):
+        p = self.share.root / rel
+        doc = self.docs.docs.get(p.resolve())
+        self._share_guard = True
+        try:
+            if doc is not None and doc.kind == "code":
+                ed = doc.view
+                if ed.toPlainText() != text:
+                    cur = ed.textCursor(); pos, anchor = cur.position(), cur.anchorPosition()
+                    ed.setPlainText(text)
+                    cur = ed.textCursor(); cur.setPosition(min(anchor, len(text))); cur.setPosition(min(pos, len(text)), cur.MoveMode.KeepAnchor); ed.setTextCursor(cur)
+            elif p.is_file():
+                p.write_text(text, encoding="utf-8")
+        finally:
+            self._share_guard = False
+        self.statusBar().showMessage(f"{who} hat {rel} geändert", 3000)
 
     def open_database(self, path: Path | None = None):
         self.d_db.show(); self.d_db.raise_()
