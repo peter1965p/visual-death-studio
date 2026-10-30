@@ -8,9 +8,9 @@ from urllib.parse import unquote, urlparse
 
 import PySide6.QtWebEngineWidgets  # noqa: F401 – muss vor der QApplication importiert werden
 
-from PySide6.QtCore import QCoreApplication, QSettings, QStandardPaths, QTimer, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, Signal, QStandardPaths, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QTextCursor
-from PySide6.QtWidgets import (QApplication, QComboBox, QMenu, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QComboBox, QTabBar, QMenu, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
                                QFrame, QScrollArea, QTabWidget, QToolBar, QToolButton, QWidget, QSizePolicy)
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
@@ -52,7 +52,7 @@ from .docks.tools import Breakpoints, Toolbox
 from .editor import code_editor
 from .editor.code_editor import set_default_font
 from .editor.documents import FORM_SUFFIX, Documents
-from . import options
+from . import __version__, options, updater
 from .icons import icon
 from .theme import C, apply_palette, stylesheet
 
@@ -61,7 +61,8 @@ PIP_NAMES = {"cv2": "opencv-python", "PIL": "pillow", "yaml": "pyyaml", "sklearn
              "dateutil": "python-dateutil", "serial": "pyserial", "Crypto": "pycryptodome", "dotenv": "python-dotenv",
              "skimage": "scikit-image", "attr": "attrs", "OpenSSL": "pyopenssl", "jwt": "pyjwt", "git": "gitpython", "usb": "pyusb"}
 
-LAYOUT_VERSION = 6   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
+LEFT_MIN, RIGHT_MIN = 320, 300
+LAYOUT_VERSION = 7   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
 ROOT = Path(__file__).resolve().parent.parent
 REPO_URL = "https://github.com/peter1965p/visual-death-studio"
 SAMPLES = {
@@ -93,6 +94,8 @@ def _shrinkable(widget, limit=80):
 
 
 class MainWindow(QMainWindow):
+    _update_found = Signal(object)          # Release aus dem Hintergrund-Thread
+
     def __init__(self, progress=None):
         super().__init__()
         step = progress or (lambda percent, text: None)          # Startbild: Fortschritt in Prozent und Statustext
@@ -212,12 +215,19 @@ class MainWindow(QMainWindow):
         for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_profiler, self.d_db, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
             self.tabifyDockWidget(self.d_output, d)
         self.d_output.raise_()
-        self.resizeDocks([self.d_explorer], [280], Qt.Horizontal)
-        self.resizeDocks([self.d_chat], [360], Qt.Horizontal)
+        for d in (self.d_explorer, self.d_toolbox, self.d_changes):
+            d.setMinimumWidth(LEFT_MIN)             # sonst werden die Reiter-Beschriftungen (»Projektm…«, »To…«) abgeschnitten
+        for d in (self.d_chat, self.d_props, self.d_preview, self.d_inspector):
+            d.setMinimumWidth(RIGHT_MIN)
+        self.resizeDocks([self.d_explorer], [340], Qt.Horizontal)
+        self.resizeDocks([self.d_chat], [400], Qt.Horizontal)
         self.resizeDocks([self.d_chat, self.d_props], [520, 260], Qt.Vertical)
         self.resizeDocks([self.d_output], [230], Qt.Vertical)
         self.all_docks = [self.d_db, self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
         QApplication.instance().focusChanged.connect(self._focus_changed)
+        self.installEventFilter(self)
+        self._update_found.connect(self._on_update_found)
+        self._fix_dock_tabbars()
 
     def _focus_changed(self, _old, new):
         for d in self.all_docks:
@@ -261,6 +271,7 @@ class MainWindow(QMainWindow):
             palcmd=A("Befehle suchen…", lambda: self.show_palette(">"), "Ctrl+Shift+P"),
             palfile=A("Datei öffnen (Schnellsuche)…", lambda: self.show_palette(), "Ctrl+P"),
             palgrep=A("In Dateien suchen…", lambda: self.show_palette("%"), "Ctrl+Shift+F"),
+            updatecheck=A("Nach Updates suchen…", lambda: self.check_updates(manual=True)),
             liveshare=A("Live Share…", self.show_share, "Ctrl+Alt+J"),
             dbexp=A("Datenbank-Explorer", self.open_database, "Ctrl+Alt+B"),
             profile=A("Profiler starten (CPU / Speicher)", self.start_profiler, "Alt+F2"),
@@ -386,7 +397,7 @@ class MainWindow(QMainWindow):
         t.addSeparator()
         t.addAction(self._act("Terminal öffnen", lambda: (self.d_terminal.show(), self.d_terminal.raise_())))
         menu("&Fenster", [a["nextdoc"], a["prevdoc"], a["closeall"], None, a["reset"]])
-        menu("&Hilfe", [a["startpage"], a["gettingstarted"], a["shortcuts"], a["toolcheck"], None, a["website"], a["reportbug"], a["license"], a["configdir"], None, a["about"]])
+        menu("&Hilfe", [a["startpage"], a["gettingstarted"], a["shortcuts"], a["toolcheck"], a["updatecheck"], None, a["website"], a["reportbug"], a["license"], a["configdir"], None, a["about"]])
 
     def _build_toolbar(self):
         tb = QToolBar("Standard", self)
@@ -745,7 +756,7 @@ class MainWindow(QMainWindow):
         self.profiler.set_root(path)
         self.dbpanel.set_root(path)
         closed = path == empty_root()
-        self.d_explorer.setWindowTitle("Projektmappen-Explorer – kein Ordner" if closed else f"Projektmappen-Explorer – {path.name}")
+        self.d_explorer.setWindowTitle("Explorer – kein Ordner" if closed else f"Explorer – {path.name if len(path.name) <= 14 else path.name[:13] + '…'}")
         self.runner.build_dir = path / ".vds" / "bin"
         self.chat.set_root(path)
         self.inspector.set_root(path)
@@ -796,6 +807,76 @@ class MainWindow(QMainWindow):
             self.output.append("  F5 baut und startet das Programm.\n", "info")
         self.statusBar().showMessage(f"{imp.kind}-Projekt importiert", 6000)
         return True
+
+    # --- Updates ------------------------------------------------------------------------
+    def check_updates(self, manual=False):
+        """Fragt GitHub im Hintergrund nach dem neuesten Release; automatisch höchstens einmal am Tag und still, wenn nichts Neues da ist."""
+        import threading
+        import time
+        if not manual:
+            if not options.get("update/check") or time.time() - float(options.get("update/last_check") or 0) < 86400:
+                return
+        options.set("update/last_check", time.time())
+        self._update_manual = manual
+        if manual:
+            self.statusBar().showMessage("Suche nach Updates …", 4000)
+        threading.Thread(target=lambda: self._update_found.emit(updater.fetch_latest() or False), daemon=True).start()
+
+    def _on_update_found(self, rel):
+        manual = getattr(self, "_update_manual", False)
+        if rel is False:
+            return manual and QMessageBox.information(self, "Updates", "Die Suche nach Updates war nicht möglich (keine Verbindung?).")
+        if not updater.is_newer(rel.tag, __version__):
+            return manual and QMessageBox.information(self, "Updates", f"Du hast die neueste Version ({__version__}).")
+        why = updater.blocker(ROOT)
+        box = QMessageBox(self)
+        box.setWindowTitle("Neue Version verfügbar")
+        box.setText(f"<b>{APP_NAME} {rel.tag}</b> ist erschienen (installiert: {__version__}).")
+        box.setInformativeText(rel.notes[:900] + (f"\n\n{why}" if why else ""))
+        later = box.addButton("Später", QMessageBox.RejectRole)
+        notes = box.addButton("Release-Seite", QMessageBox.HelpRole)
+        go = box.addButton("Jetzt aktualisieren", QMessageBox.AcceptRole) if not why else None
+        box.exec()
+        if box.clickedButton() is notes:
+            QDesktopServices.openUrl(QUrl(rel.url or REPO_URL + "/releases"))
+        elif go is not None and box.clickedButton() is go:
+            self.install_update(rel.tag)
+
+    def install_update(self, tag: str) -> bool:
+        """Spielt das Release ein und startet die IDE neu."""
+        self.docs.save_all()
+        self.statusBar().showMessage("Aktualisiere …")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok, msg = updater.apply_update(ROOT, tag)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not ok:
+            QMessageBox.warning(self, "Update", msg)
+            return False
+        QMessageBox.information(self, "Update", msg + "\nVisual Death Studio startet jetzt neu.")
+        self.restart_app()
+        return True
+
+    def restart_app(self):
+        from PySide6.QtCore import QProcess
+        QProcess.startDetached(sys.executable, [str(ROOT / "run.py"), *[a for a in sys.argv[1:] if a != "--no-splash"]])
+        self.close()
+
+    # --- Reiter der Dock-Gruppen ------------------------------------------------------------
+    def _fix_dock_tabbars(self):
+        """Dock-Reiter bleiben vollständig lesbar; wird es eng, erscheinen Pfeile zum Blättern statt abgeschnittener Beschriftung."""
+        for tb in self.findChildren(QTabBar):
+            if tb.parent() is self:
+                tb.setElideMode(Qt.ElideNone)
+                tb.setUsesScrollButtons(True)
+
+    def eventFilter(self, obj, ev):
+        # Qt setzt Kürzung und Pfeile bei jeder Layout-Änderung zurück: nach jedem Layout-Ereignis erneut anwenden (zusammengefasst)
+        if obj is self and ev.type() in (QEvent.ChildAdded, QEvent.LayoutRequest, QEvent.Resize, QEvent.Show) and not getattr(self, "_tabfix_pending", False):
+            self._tabfix_pending = True
+            QTimer.singleShot(0, lambda: (setattr(self, "_tabfix_pending", False), self._fix_dock_tabbars()))
+        return super().eventFilter(obj, ev)
 
     # --- Live Share ---------------------------------------------------------------------
     def show_share(self):
@@ -1571,7 +1652,6 @@ class MainWindow(QMainWindow):
     def about(self):
         import platform
         import PySide6
-        from . import __version__
         QMessageBox.about(self, APP_NAME, f"<h3>{APP_NAME} {__version__}</h3>"
                           "<p>Eine Qt-IDE mit Neon-Oberfläche, Formular-Designer, Debugger, IntelliSense und Claude-Anbindung.</p>"
                           f"<p>Python {platform.python_version()} · PySide6 {PySide6.__version__}<br>MIT-Lizenz · © 2026 Päffgen IT by Peter Päffgen</p>"
@@ -1655,6 +1735,7 @@ def main():
     w._default_state = w.saveState()
     w.show()
     w.maybe_show_start_page()
+    QTimer.singleShot(5000, w.check_updates)
     if splash:
         splash.finish(w)
     code = app.exec()

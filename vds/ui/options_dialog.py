@@ -85,6 +85,7 @@ class OptionsDialog(QDialog):
         tf = QFormLayout(); tf.addRow("Farbschema", theme); lay.addLayout(tf); lay.addWidget(self.theme_note); lay.addWidget(self.restart_btn)
         theme.currentIndexChanged.connect(self._theme_hint); self._theme_hint()
         lay.addWidget(self._bool("ui/start_page", "Startseite mit zuletzt geöffneten Projekten beim Start zeigen"))
+        lay.addWidget(self._bool("update/check", "Beim Start nach neuen Versionen suchen (höchstens einmal am Tag)"))
         lay.addWidget(self._bool("ui/splash", "Startbild mit Fortschrittsanzeige zeigen (beim nächsten Start)"))
         for text, slot in (("Fensterlayout zurücksetzen", self._reset_layout), ("Konfigurationsordner öffnen", self._open_config),
                            ("Einstellungen exportieren …", self._export), ("Einstellungen importieren …", self._import)):

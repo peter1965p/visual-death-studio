@@ -15,6 +15,7 @@ DEFAULTS = {
     "claude/provider": "auto",
     "claude/api_model": "claude-opus-5-5", "claude/api_completion_model": "claude-haiku-5-5", "claude/api_base_url": "",
     "claude/api_max_tokens": 32000, "claude/api_effort": "", "claude/api_fallbacks": True,
+    "update/check": True, "update/last_check": 0,
     "ui/splash": True, "ui/theme": "neon", "ui/start_page": True,
     # Web-Vorschau
     "web/auto_open": True, "web/auto_reload": "ohne-hmr", "web/device": "Frei (füllt das Fenster)",
