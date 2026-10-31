@@ -298,3 +298,13 @@ def test_blocks_dock_is_wired_to_inspector_and_outline(win, monkeypatch):
     assert win.blocks.tree.currentItem().text(0) == "p"
     mime = win.blocks.blocks.mimeData([item])
     assert mime.text() == "vds-block:heading"
+
+
+def test_no_shortcut_is_bound_twice(win):
+    """Doppelt belegte Kürzel löst Qt gar nicht aus (Strg+Alt+B war für Datenbank-Explorer und visuelles Bearbeiten vergeben)."""
+    seen: dict = {}
+    for key, act in win.a.items():
+        sc = act.shortcut().toString()
+        if sc:
+            assert sc not in seen, f"{sc} ist doppelt vergeben: {seen[sc]} und {key}"
+            seen[sc] = key
