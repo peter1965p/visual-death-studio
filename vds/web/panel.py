@@ -39,6 +39,8 @@ class PreviewPanel(QWidget):
     consoleMessage = Signal(str, str, int, str)
     pageLoaded = Signal(bool, str)
     ready = Signal(dict)
+    saveRequested = Signal()
+    discardRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,8 +74,15 @@ class PreviewPanel(QWidget):
             bar.addWidget(w)
         self.status = QLabel(); self.status.setObjectName("sub")
         self.scroll = QScrollArea(); self.scroll.setWidget(self.view); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QScrollArea.NoFrame)
+        self.btn_save = QPushButton("💾 In Quellcode speichern"); self.btn_save.setToolTip("Alle Änderungen aus „Bearbeiten“ in die Projektdateien schreiben (Vorschau der Änderung vorher)")
+        self.btn_save.clicked.connect(lambda: self.saveRequested.emit())
+        self.btn_discard = QPushButton("Verwerfen"); self.btn_discard.setToolTip("Änderungen in der Vorschau zurücknehmen")
+        self.btn_discard.clicked.connect(lambda: self.discardRequested.emit())
+        foot = QHBoxLayout(); foot.setContentsMargins(4, 2, 4, 2); foot.setSpacing(4)
+        foot.addWidget(self.status, 1); foot.addWidget(self.btn_discard); foot.addWidget(self.btn_save)
+        self.set_pending(0)
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
-        lay.addLayout(bar); lay.addWidget(self.scroll, 1); lay.addWidget(self.status)
+        lay.addLayout(bar); lay.addWidget(self.scroll, 1); lay.addLayout(foot)
         # Signale
         self.page.toolMessage.connect(self._tool_message)
         self.page.consoleMessage.connect(self.consoleMessage)
@@ -81,6 +90,11 @@ class PreviewPanel(QWidget):
         self.view.urlChanged.connect(self._url_changed)
         self._reload_timer = QTimer(self, singleShot=True, interval=250)
         self._reload_timer.timeout.connect(self.reload)
+
+    def set_pending(self, n: int):
+        """Anzahl der noch nicht in den Quellcode übernommenen Änderungen; die Knöpfe erscheinen nur, wenn es welche gibt."""
+        self.btn_save.setVisible(n > 0); self.btn_discard.setVisible(n > 0)
+        self.btn_save.setText(f"💾 In Quellcode speichern ({n})" if n else "💾 In Quellcode speichern")
 
     @staticmethod
     def _tool(text, tip, slot, checkable=False):
@@ -136,7 +150,7 @@ class PreviewPanel(QWidget):
         self.mode = mode
         self.btn_pick.setChecked(mode == "pick"); self.btn_edit.setChecked(mode == "edit")
         self.eval(f"window.__vds && window.__vds.setMode({json.dumps(mode)})")
-        self.status.setText({"pick": "Auswählen: Element anklicken", "edit": "Bearbeiten: ziehen = verschieben, Griffe = Größe, Doppelklick = Text", "off": ""}[mode])
+        self.status.setText({"pick": "Auswählen: Element anklicken", "edit": "Bearbeiten: ziehen = verschieben, Pfeiltasten = fein, Griffe = Größe, Doppelklick = Text", "off": ""}[mode])
 
     def _tool_message(self, kind: str, data: dict):
         if kind == "pick":

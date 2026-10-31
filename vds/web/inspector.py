@@ -83,6 +83,7 @@ class WebInspector(QWidget):
         self.text_pending: dict = {}       # Pfad -> (alt, neu, info)
         self.undo_stack: list = []
         self.candidates: list = []
+        self.flush = None                  # wird vor dem Planen aufgerufen (ungespeicherte Editor-Tabs sichern)
         self.fields: dict = {}
         self.head = QLabel("Kein Element gewählt – in der Web-Vorschau „⌖ Auswählen“ und ein Element anklicken.")
         self.head.setWordWrap(True); self.head.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -120,6 +121,8 @@ class WebInspector(QWidget):
         panel.picked.connect(self.show_info)
         panel.changed.connect(self._changed)
         panel.textChanged.connect(self._text_msg)
+        panel.saveRequested.connect(lambda: self.write_back())
+        panel.discardRequested.connect(self.discard)
         self._set_active(False)
         self._refresh()
 
@@ -183,6 +186,7 @@ class WebInspector(QWidget):
             self.changes.addItem(f"{describe(info)}: Text „{old[:20]}“ → „{new[:20]}“")
         n = len(self.pending) + len(self.text_pending)
         self.btn_write.setEnabled(n > 0); self.btn_discard.setEnabled(n > 0); self.btn_undo.setEnabled(bool(self.undo_stack))
+        self.panel.set_pending(n)
 
     def discard(self):
         self.panel.eval("window.__vds && window.__vds.revertAll()")
@@ -217,10 +221,14 @@ class WebInspector(QWidget):
             tp = self.text_pending.get(path)
             items.append((f"{describe(d['info'])} – {', '.join(d['props'])}", plans))
         for path, (old, new, info) in self.text_pending.items():
-            items.append((f"{describe(info)} – Text", writer.text_plans(self.root, old, new, source_map.search(self.root, info))))
+            plans = writer.text_plans(self.root, old, new, source_map.search(self.root, info))
+            hint = "" if plans else "  (kommt vermutlich aus Datenbank oder Variable und steht nicht im Quellcode)"
+            items.append((f"{describe(info)} – Text{hint}", plans))
         return items
 
     def write_back(self, confirm=True) -> list:
+        if self.flush:
+            self.flush()
         items = self.build_plans()
         if not items:
             return []
@@ -248,6 +256,8 @@ class WebInspector(QWidget):
 
     def undo_last(self):
         if self.undo_stack:
-            writer.undo(self.undo_stack.pop())
+            backup = self.undo_stack.pop()
+            writer.undo(backup)
             self._refresh()
+            self.applied.emit([str(f) for f in backup])
             self.panel.schedule_reload(force=True)

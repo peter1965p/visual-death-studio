@@ -34,6 +34,8 @@
   }
   const generated = (c) => /^[_\-]?[a-zA-Z]*[_-]{1,2}[a-zA-Z0-9]{5,}$/.test(c) && /\d/.test(c) || /^(css|sc|jsx|svelte|astro)-[a-z0-9]+$/i.test(c);
 
+  function sheets() { const o = []; for (const s of document.styleSheets) { try { if (s.href && o.length < 30) o.push(new URL(s.href).pathname); } catch (e) { /* nichts */ } } return o; }
+
   function info(el) {
     const cs = getComputedStyle(el), r = el.getBoundingClientRect(), computed = {};
     for (const p of PROPS) computed[p] = cs.getPropertyValue(p);
@@ -44,7 +46,7 @@
     return { path: cssPath(el), tag: el.tagName.toLowerCase(), id: el.id || "", classes: [...el.classList],
       stableClasses: [...el.classList].filter((c) => !generated(c)), text: ownText(el).slice(0, 160), attrs, inline: el.getAttribute("style") || "",
       rect: { x: r.x, y: r.y, w: r.width, h: r.height }, computed, chain, children: el.children.length, vds: v ? v.getAttribute("data-vds") : "",
-      html: el.outerHTML.slice(0, 400), overrides: overridesOf(el) };
+      html: el.outerHTML.slice(0, 400), overrides: overridesOf(el), sheets: sheets() };
   }
   function overridesOf(el) { const m = overrides.get(el), o = {}; if (m) for (const k in m) o[k] = m[k].val; return o; }
 
@@ -159,6 +161,17 @@
     t.addEventListener("blur", done); t.addEventListener("keydown", key);
     const rg = document.createRange(); rg.selectNodeContents(t); const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
   }
+  document.addEventListener("keydown", (e) => {          // Pfeiltasten verschieben das gewählte Element (Umschalt = 10 px)
+    if (mode !== "edit" || !sel || sel.isContentEditable || !/^Arrow(Left|Right|Up|Down)$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault(); e.stopPropagation();
+    const step = e.shiftKey ? 10 : 1, cs = getComputedStyle(sel);
+    if (cs.position === "static") setOverride(sel, "position", "relative");
+    const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0, dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+    const px = (n) => Math.round(n) + "px";
+    if (dx) setOverride(sel, "left", px((parseFloat(getComputedStyle(sel).left) || 0) + dx));
+    if (dy) setOverride(sel, "top", px((parseFloat(getComputedStyle(sel).top) || 0) + dy));
+    draw(); emitChanged(sel);
+  }, true);
   function setMode(m) {
     mode = m; build(); hoverEl = null; if (m === "off") { drag = null; }
     document.documentElement.style.cursor = m === "off" ? "" : (m === "pick" ? "crosshair" : "default");

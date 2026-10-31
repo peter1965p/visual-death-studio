@@ -279,3 +279,14 @@ def test_pending_changes_survive_until_written_or_discarded(qapp, pump, panel):
     assert ins.btn_discard.isEnabled()
     ins.discard()
     assert pump(lambda: not ins.pending, 5) and computed(panel, pump, ".box", "opacity") == "1"
+
+
+def test_save_buttons_follow_pending_changes(qapp, pump, panel, site):
+    ins = panel.inspector
+    assert panel.btn_save.isHidden() and panel.btn_discard.isHidden()
+    pick(panel, pump, "#titel")
+    ins.set_style("color", "#0000ff")
+    assert pump(lambda: ins.pending, 10)
+    assert not panel.btn_save.isHidden() and "(1)" in panel.btn_save.text()
+    panel.btn_discard.click()
+    assert pump(lambda: not ins.pending and panel.btn_save.isHidden(), 10)

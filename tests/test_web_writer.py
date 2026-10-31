@@ -203,3 +203,23 @@ def test_detect_command_for_octane_roadrunner_and_frankenphp(tmp_path):
     (other / "rr").write_text("#!/bin/sh"); assert devserver.detect_command(other) == "./rr serve"
     fp = tmp_path / "fp"; fp.mkdir(); (fp / "Caddyfile").write_text("{ frankenphp }")
     assert devserver.detect_command(fp) == "frankenphp run"
+
+
+def test_new_rule_goes_into_the_stylesheet_the_page_loads(tmp_path):
+    """Laravel: Seite lädt /css/app.css → public/css/app.css, nicht irgendeine andere CSS-Datei."""
+    (tmp_path / "public" / "css").mkdir(parents=True); (tmp_path / "resources" / "css").mkdir(parents=True)
+    (tmp_path / "public" / "css" / "app.css").write_text(".a { color: red; }\n")
+    (tmp_path / "resources" / "css" / "app.css").write_text(".b { color: red; }\n")
+    info = {"tag": "a", "id": "", "classes": ["neu"], "stableClasses": ["neu"], "sheets": ["/css/app.css", "/x/fehlt.css", "/../../etc/passwd"]}
+    plan = writer.new_rule_plan(tmp_path, info, {"color": "#fff"})
+    assert plan.file == (tmp_path / "public" / "css" / "app.css").resolve() and ".neu {" in plan.new
+    assert writer.sheet_files(tmp_path, info["sheets"]) == [(tmp_path / "public" / "css" / "app.css").resolve()]
+
+
+def test_existing_rule_in_loaded_sheet_is_offered_first(tmp_path):
+    (tmp_path / "public").mkdir(); (tmp_path / "resources").mkdir()
+    (tmp_path / "public" / "app.css").write_text(".x { color: red; }\n")
+    (tmp_path / "resources" / "app.css").write_text(".x { color: blue; }\n")
+    info = {"tag": "p", "id": "", "classes": ["x"], "stableClasses": ["x"], "sheets": ["/app.css"]}
+    plans = writer.css_plans(tmp_path.resolve(), info, {"color": "#000"})
+    assert [p.file.parent.name for p in plans] == ["public", "resources"]

@@ -11,7 +11,8 @@ from . import source_map as sm
 STYLE_BLOCK = re.compile(r"(<style\b[^>]*>)(.*?)(</style>)", re.S | re.I)
 UNITLESS = {"opacity", "z-index", "font-weight", "line-height", "flex", "order"}
 CSS_FILES = ("src/index.css", "src/App.css", "src/style.css", "src/styles.css", "src/assets/main.css", "src/assets/css/main.css", "assets/css/main.css",
-             "app/globals.css", "styles/globals.css", "public/css/style.css", "public/style.css", "css/style.css", "style.css", "styles.css")
+             "app/globals.css", "styles/globals.css", "public/css/style.css", "public/style.css", "css/style.css", "style.css", "styles.css",
+             "public/css/app.css", "resources/css/app.css")
 
 
 @dataclass
@@ -158,10 +159,29 @@ def rule_matches(selector: str, ident: str, classes: list) -> int:
     return best
 
 
+def sheet_files(root: Path, sheets: list | None) -> list:
+    """Stylesheets, die die Seite wirklich lädt (URL-Pfade aus dem Browser), als Dateien im Projekt – z. B. /css/app.css → public/css/app.css."""
+    root, out = Path(root).resolve(), []
+    for url in sheets or []:
+        rel = url.split("?")[0].lstrip("/")
+        for base in ("public", "", "static", "web", "wwwroot"):
+            f = (root / base / rel).resolve()
+            try:
+                parts = f.relative_to(root).parts
+            except ValueError:
+                continue
+            if rel and f.is_file() and f.suffix.lower() in sm.STYLE_EXT and not any(x in sm.SKIP_DIRS for x in parts) and f not in out:
+                out.append(f); break
+    return out
+
+
 def css_plans(root: Path, info: dict, props: dict) -> list:
     ident, classes = info.get("id", ""), info.get("classes", [])
     plans = []
-    for f in sm.project_files(root, sm.STYLE_EXT | {".vue", ".svelte", ".html", ".htm", ".php", ".astro"}):
+    loaded = sheet_files(root, info.get("sheets"))
+    files = sm.project_files(root, sm.STYLE_EXT | {".vue", ".svelte", ".html", ".htm", ".php", ".astro"})
+    for f in sorted(files, key=lambda f: f.resolve() not in loaded):                     # geladene Stylesheets zuerst
+
         text = sm.read(f)
         if text is None or (f.suffix.lower() not in sm.STYLE_EXT and "<style" not in text.lower()):
             continue
@@ -186,6 +206,11 @@ def new_rule_plan(root: Path, info: dict, props: dict) -> Plan | None:
         return None
     body = "".join(f"\n  {kebab(k)}: {v};" for k, v in props.items())
     block = f"\n{sel} {{{body}\n}}\n"
+    for f in sheet_files(root, info.get("sheets")):                                   # in das Stylesheet, das die Seite lädt
+        text = sm.read(f)
+        if text is not None:
+            rel = f.relative_to(Path(root).resolve())
+            return Plan("neue-regel", f"Neue Regel „{sel}“ am Ende von {rel}", f, text, text.rstrip("\n") + "\n" + block)
     for rel in CSS_FILES:
         f = root / rel
         text = sm.read(f) if f.exists() else None

@@ -256,3 +256,18 @@ def test_start_page_survives_closing_its_tab_and_closing_the_folder(win, tmp_pat
     win.close_folder()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     assert isValid(win.start) and win.docs.count() == 1 and win.docs.tabText(0) == "Startseite"
+
+
+def test_written_changes_reload_open_editor_tab_and_unsaved_edits_are_flushed_first(win, tmp_path):
+    from vds.web import writer
+    css = tmp_path / "style.css"
+    css.write_text(".kopf { color: red; }\n")
+    doc = win.docs.open(css)
+    ed = doc.editor
+    ed.setPlainText(".kopf { color: red; }\n/* ungespeichert */\n"); ed.document().setModified(True)
+    assert doc.modified
+    win.inspector.flush()                                      # wie write_back: ungespeicherte Tabs zuerst sichern
+    assert "ungespeichert" in css.read_text() and not doc.modified
+    text = css.read_text()
+    win.inspector.commit([writer.Plan("css-regel", "x", css.resolve(), text, text.replace("red", "blue"))])
+    assert "blue" in css.read_text() and "blue" in ed.toPlainText()    # Tab zeigt die geschriebene Fassung

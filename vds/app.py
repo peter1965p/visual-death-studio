@@ -488,6 +488,8 @@ class MainWindow(QMainWindow):
         self.preview.view.loadStarted.connect(lambda: self.errors.set_source("web", []))
         self.preview.pageLoaded.connect(lambda ok, url: ok and self.settings.setValue(f"web/url/{self.root}", url))
         self.inspector.openFile.connect(lambda f, line: self.goto(f, line, 1))
+        self.inspector.flush = self.docs.save_modified_code
+        self.inspector.applied.connect(self._web_applied)
         self.inspector.designerControl.connect(self._select_designer_control)
         self.lsp.diagnostics.connect(self._lsp_diagnostics)
         self.lsp.editRequested.connect(lambda edits, label: self._apply_refactor(edits, label, preview=len(edits) > 1))
@@ -656,6 +658,12 @@ class MainWindow(QMainWindow):
         self.errors.set_source("web", rows)
         if level == "error":
             self.output.append(f"[Browser] {msg}\n", "stderr")
+
+    def _web_applied(self, files):
+        """Visuelle Änderungen sind in den Dateien: offene Tabs nachladen, Vorschau neu laden."""
+        self.docs.reload_changed()
+        self.preview.schedule_reload(force=True)
+        self.statusBar().showMessage(f"{len(files)} Datei(en) aus der Web-Vorschau geschrieben", 5000)
 
     def _web_saved(self, d):
         mode = options.get("web/auto_reload")
