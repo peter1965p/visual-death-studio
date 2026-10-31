@@ -1,8 +1,11 @@
 """Schreibt visuelle Änderungen (Stile, Text) zurück in den Quellcode: bestehende CSS-Regel, Tailwind-Klassen, Inline-Style oder neue Regel.
 Jede Möglichkeit ist ein `Plan` mit alter und neuer Dateifassung – der Nutzer sieht den Unterschied, bevor etwas geschrieben wird."""
+import base64
 import difflib
 import json
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,8 +26,11 @@ class Plan:
     old: str
     new: str
     shared: int = 0    # >1: die Regel gilt für so viele Elemente der Seite
+    run: tuple | None = None   # kein Dateiplan, sondern eine Aktion: ("setting", Projektordner, Schlüssel, alter Text, neuer Text)
 
     def diff(self, root: Path | None = None) -> str:
+        if self.run:
+            return f"Datenbank-Einstellung „{self.run[2]}“\n- {self.run[3]}\n+ {self.run[4]}\n"
         name = str(self.file.relative_to(root)) if root and root in self.file.parents else self.file.name
         return "".join(difflib.unified_diff(self.old.splitlines(True), self.new.splitlines(True), "a/" + name, "b/" + name, n=2))
 
@@ -436,6 +442,68 @@ def text_plans(root: Path, old: str, new: str, cands: list) -> list:
     return plans
 
 
+# --- Laravel-Einstellungen (Text kommt aus der Datenbank) --------------------------------------------------------------
+def _php(root: Path, code: str, timeout=30) -> str | None:
+    """Führt PHP-Code mit gestarteter Laravel-Anwendung aus (ohne tinker). Wie der Startbefehl der IDE: .vds/php zusätzlich als ini-Ordner."""
+    env = dict(os.environ)
+    if (root / ".vds" / "php").is_dir():
+        env["PHP_INI_SCAN_DIR"] = f":{root / '.vds' / 'php'}"
+    boot = "require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); "
+    try:
+        r = subprocess.run(["php", "-r", boot + code], cwd=root, capture_output=True, text=True, timeout=timeout, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def has_settings_model(root: Path) -> bool:
+    f = Path(root) / "app" / "Models" / "Setting.php"
+    text = sm.read(f) if f.is_file() else None
+    return bool(text and "function put" in text and "function get" in text and (Path(root) / "artisan").is_file())
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", " ", t or "").strip()
+
+
+def setting_values(root: Path) -> dict | None:
+    """{Schlüssel: aktuell angezeigter Text} für alle Einstellungen (Standardwerte und Datenbank)."""
+    out = _php(Path(root), "$k = array_keys(\\App\\Models\\Setting::definitions()); $o = []; foreach ($k as $x) { $o[$x] = \\App\\Models\\Setting::get($x); } echo json_encode($o);")
+    try:
+        return json.loads(out) if out else None
+    except ValueError:
+        return None
+
+
+def setting_put(root: Path, key: str, value: str | None) -> bool:
+    """Wert setzen; None entfernt die Zeile (dann gilt wieder der Standardwert)."""
+    arg = base64.b64encode(json.dumps([key, value]).encode()).decode()
+    code = (f"[$k, $v] = json_decode(base64_decode('{arg}'), true); "
+            "if ($v === null) { \\App\\Models\\Setting::where('key', $k)->delete(); } else { \\App\\Models\\Setting::put($k, $v); } echo 'ok';")
+    return _php(Path(root), code) == "ok"
+
+
+def setting_raw(root: Path, key: str):
+    """Wert der Datenbankzeile (None = keine Zeile) für „Rückgängig“; Fehler → False."""
+    arg = base64.b64encode(json.dumps(key).encode()).decode()
+    out = _php(Path(root), f"$k = json_decode(base64_decode('{arg}')); $r = \\App\\Models\\Setting::where('key', $k)->first(); echo json_encode($r ? $r->value : null);")
+    try:
+        return json.loads(out) if out else False
+    except ValueError:
+        return False
+
+
+def setting_plans(root: Path, old: str, new: str) -> list:
+    """Text, der per `Setting::get('schluessel')` aus der Datenbank kommt: den Wert dort ändern, wo er herkommt."""
+    root = Path(root).resolve()
+    if _norm(old) == _norm(new) or not has_settings_model(root):
+        return []
+    values = setting_values(root) or {}
+    keys = [k for k, v in values.items() if _norm(v) == _norm(old)]
+    return [Plan("setting", f"Laravel-Einstellung „{k}“ in der Datenbank ändern", root / "app" / "Models" / "Setting.php", "", "",
+                 run=("setting", root, k, values[k], new.strip())) for k in keys[:3]]
+
+
 # --- Gesamtplan ------------------------------------------------------------------------------------------------------
 def plan_style(root: Path, info: dict, props: dict, cands: list | None = None) -> list:
     """Alle Möglichkeiten, die geänderten Eigenschaften eines Elements in den Quellcode zu übernehmen – beste zuerst."""
@@ -476,9 +544,12 @@ def region(plan: Plan) -> tuple:
 def merge(plans: list) -> tuple:
     """Pläne für dieselbe Datei zu einem zusammenfassen (z. B. Stil und Text im selben Element). -> (Pläne, übersprungene Pläne bei Überlappung)"""
     by_file: dict = {}
-    for p in plans:
-        by_file.setdefault(p.file, []).append(p)
     out, skipped = [], []
+    for p in plans:
+        if p.run:
+            out.append(p)
+        else:
+            by_file.setdefault(p.file, []).append(p)
     for f, ps in by_file.items():
         if len(ps) == 1:
             out.append(ps[0]); continue
@@ -499,6 +570,12 @@ def apply(plans: list) -> dict:
     """Schreibt die Pläne; gibt {Datei: alter Inhalt} für „Rückgängig“ zurück. Mehrere Pläne für dieselbe Datei werden nacheinander angewendet."""
     backup = {}
     for p in plans:
+        if p.run:
+            _, root, key, _old, new = p.run
+            before = setting_raw(root, key)
+            if before is not False and setting_put(root, key, new):
+                backup[("setting", root, key)] = before
+            continue
         backup.setdefault(p.file, p.old)
         p.file.write_text(p.new, encoding="utf-8")
     return backup
@@ -506,4 +583,7 @@ def apply(plans: list) -> dict:
 
 def undo(backup: dict):
     for f, old in backup.items():
-        f.write_text(old, encoding="utf-8")
+        if isinstance(f, tuple):
+            setting_put(f[1], f[2], old)
+        else:
+            f.write_text(old, encoding="utf-8")

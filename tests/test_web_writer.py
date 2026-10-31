@@ -238,3 +238,37 @@ def test_shared_class_rule_is_last_choice_and_new_rule_is_unique(tmp_path):
     assert ".btn-primary {" in writer.new_rule_plan(tmp_path, info, {"left": "5px"}).new
     both = {**info, "classCounts": {"btn": 2, "btn-primary": 2, "btn-lg": 2}}
     assert ".btn.btn-primary.btn-lg {" in writer.new_rule_plan(tmp_path, both, {"left": "5px"}).new
+
+
+def test_text_from_laravel_setting_is_written_to_the_database_and_undone(tmp_path, monkeypatch):
+    """`{{ Setting::get('hero') }}` steht nicht im Quelltext: die IDE ändert den Wert dort, wo er herkommt (PHP hier nachgestellt)."""
+    (tmp_path / "app" / "Models").mkdir(parents=True)
+    (tmp_path / "artisan").write_text("")
+    (tmp_path / "app" / "Models" / "Setting.php").write_text("<?php class Setting { static function get($k){} static function put($k,$v){} }")
+    db = {"hero": "Alt", "x": "Anderes"}
+    calls = []
+
+    def fake_php(root, code, timeout=30):
+        calls.append(code)
+        if "definitions" in code:
+            return json.dumps(db)
+        if "->first()" in code:
+            return json.dumps(db.get("hero"))
+        if "Setting::put" in code:
+            import base64, re
+            k, v = json.loads(base64.b64decode(re.search(r"base64_decode\('([^']+)'", code).group(1)))
+            db.pop(k) if v is None else db.__setitem__(k, v)
+            return "ok"
+    monkeypatch.setattr(writer, "_php", fake_php)
+    plans = writer.setting_plans(tmp_path, " Alt ", "Neu")
+    assert [p.run[2] for p in plans] == ["hero"] and "+ Neu" in plans[0].diff()
+    assert writer.setting_plans(tmp_path, "unbekannt", "Neu") == [] and writer.setting_plans(tmp_path, "Alt", "Alt") == []
+    out, skipped = writer.merge(plans)
+    backup = writer.apply(out)
+    assert db["hero"] == "Neu" and list(backup.values()) == ["Alt"]
+    writer.undo(backup)
+    assert db["hero"] == "Alt"
+
+
+def test_no_setting_plan_without_laravel_model(tmp_path):
+    assert writer.setting_plans(tmp_path, "a", "b") == []

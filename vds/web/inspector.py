@@ -221,7 +221,7 @@ class WebInspector(QWidget):
             tp = self.text_pending.get(path)
             items.append((f"{describe(d['info'])} – {', '.join(d['props'])}", plans))
         for path, (old, new, info) in self.text_pending.items():
-            plans = writer.text_plans(self.root, old, new, source_map.search(self.root, info))
+            plans = writer.setting_plans(self.root, old, new) + writer.text_plans(self.root, old, new, source_map.search(self.root, info))
             hint = "" if plans else "  (kommt vermutlich aus Datenbank oder Variable und steht nicht im Quellcode)"
             items.append((f"{describe(info)} – Text{hint}", plans))
         return items
@@ -250,7 +250,7 @@ class WebInspector(QWidget):
         self.panel.eval("window.__vds && window.__vds.revertAll()")
         self.pending.clear(); self.text_pending.clear()
         self._refresh()
-        files = [str(f) for f in backup]
+        files = [f"Einstellung {f[2]}" if isinstance(f, tuple) else str(f) for f in backup]
         self.applied.emit(files)
         return files
 
@@ -259,5 +259,5 @@ class WebInspector(QWidget):
             backup = self.undo_stack.pop()
             writer.undo(backup)
             self._refresh()
-            self.applied.emit([str(f) for f in backup])
+            self.applied.emit([f"Einstellung {f[2]}" if isinstance(f, tuple) else str(f) for f in backup])
             self.panel.schedule_reload(force=True)
