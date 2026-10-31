@@ -277,8 +277,24 @@ def test_visual_workspace_shows_only_preview_and_inspector_and_restores(win, pum
     win.show(); win.resize(1600, 900)
     before = {d: d.isVisible() for d in win.all_docks}
     win.a["webvisual"].trigger()
-    assert win.d_preview.isVisible() and win.d_inspector.isVisible() and not win.docs.isVisible()
+    assert win.d_preview.isVisible() and win.d_inspector.isVisible() and win.d_blocks.isVisible() and not win.docs.isVisible()
     assert not win.d_explorer.isVisible() and win.preview.mode == "edit"
     assert pump(lambda: win.d_preview.width() > win.d_inspector.width() and win.d_inspector.width() < 700, 5)
     win.a["webvisual"].trigger()
     assert win.docs.isVisible() and win.d_explorer.isVisible() == before[win.d_explorer]
+
+
+def test_blocks_dock_is_wired_to_inspector_and_outline(win, monkeypatch):
+    calls = []
+    monkeypatch.setattr(win.inspector, "insert_block", lambda block, where="after": calls.append((block, where)))
+    assert win.d_blocks in win.all_docks and win.d_blocks.windowTitle() == "Web-Bausteine"
+    item = win.blocks.blocks.item(0)
+    win.blocks.where.setCurrentIndex(1)
+    win.blocks.blocks.itemDoubleClicked.emit(item)
+    assert calls == [("heading", "inside")]
+    win.preview.outlineChanged.emit([{"p": "h1", "t": "h1", "i": "a", "c": ["x"], "x": "Hallo", "k": []}, {"p": "div", "t": "div", "k": [{"p": "div > p", "t": "p", "k": []}]}])
+    assert win.blocks.tree.topLevelItemCount() == 2 and win.blocks.tree.topLevelItem(0).text(0) == "h1#a.x  – Hallo"
+    win.preview.picked.emit({"path": "div > p"})
+    assert win.blocks.tree.currentItem().text(0) == "p"
+    mime = win.blocks.blocks.mimeData([item])
+    assert mime.text() == "vds-block:heading"

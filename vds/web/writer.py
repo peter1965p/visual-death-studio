@@ -508,12 +508,19 @@ def setting_plans(root: Path, old: str, new: str) -> list:
 def plan_style(root: Path, info: dict, props: dict, cands: list | None = None) -> list:
     """Alle Möglichkeiten, die geänderten Eigenschaften eines Elements in den Quellcode zu übernehmen – beste zuerst."""
     root = Path(root).resolve()
-    cands = cands if cands is not None else sm.search(root, info)
+    located = None
+    if cands is None:
+        from . import markup                                          # Elementstruktur: genauer als die Suche nach Klassen und Text
+        found = markup.locate(root, info)
+        located = found[0] if found else None
+        cands = sm.search(root, info)
     props = {k: v for k, v in props.items() if v != ""}
     if not props:
         return []
     plans = []
     best = next((c for c in cands if c.file.suffix.lower() in sm.MARKUP_EXT and c.kind in ("id", "klasse")), None) or next(iter(cands), None)
+    if located:
+        best = sm.Candidate(located.file, located.line, located.node.start + 1, located.score, "klasse", located.snippet)
     if best:
         tw = tailwind_plan(root, best, props)
         tw and plans.append(tw)

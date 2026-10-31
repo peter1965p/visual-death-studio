@@ -23,6 +23,7 @@ from .ui.palette import CommandPalette
 from .ui.share_dialog import ShareDialog
 from .share.session import ShareSession, write_files
 from .web import devserver
+from .web.blocks import BlocksPanel
 from .web.inspector import WebInspector
 from .web.panel import PreviewPanel
 from .designer import codegen
@@ -62,7 +63,7 @@ PIP_NAMES = {"cv2": "opencv-python", "PIL": "pillow", "yaml": "pyyaml", "sklearn
              "skimage": "scikit-image", "attr": "attrs", "OpenSSL": "pyopenssl", "jwt": "pyjwt", "git": "gitpython", "usb": "pyusb"}
 
 LEFT_MIN, RIGHT_MIN = 320, 300
-LAYOUT_VERSION = 7   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
+LAYOUT_VERSION = 8   # erhöhen, wenn sich das Dock-Layout ändert (verwirft gespeicherte Zustände)
 ROOT = Path(__file__).resolve().parent.parent
 REPO_URL = "https://github.com/peter1965p/visual-death-studio"
 SAMPLES = {
@@ -170,6 +171,7 @@ class MainWindow(QMainWindow):
         self.chat = ChatPanel()
         self.preview = PreviewPanel()
         self.inspector = WebInspector(self.preview)
+        self.blocks = BlocksPanel()
         self.start = startpage.StartPage()
         self.changes = ChangesPanel()
         self.packages = PackagePanel()
@@ -182,6 +184,7 @@ class MainWindow(QMainWindow):
         self.setTabPosition(Qt.LeftDockWidgetArea, QTabWidget.South)
         self.d_explorer = self._dock("Projektmappen-Explorer", self.explorer, L, "explorer")
         self.d_toolbox = self._dock("Toolbox", self.toolbox, L, "toolbox")
+        self.d_blocks = self._dock("Web-Bausteine", self.blocks, L, "webblocks")
         self.d_changes = self._dock("Änderungen", self.changes, L, "changes")
         self.d_chat = self._dock("Claude", self.chat, R, "chat")
         self.d_props = self._dock("Eigenschaften", self.props, R, "props")
@@ -192,6 +195,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.d_props, self.d_inspector)
         self.d_chat.raise_(); self.d_props.raise_()
         self.tabifyDockWidget(self.d_explorer, self.d_toolbox)
+        self.tabifyDockWidget(self.d_explorer, self.d_blocks)
         self.tabifyDockWidget(self.d_explorer, self.d_changes)
         self.d_explorer.raise_()
         self.d_output = self._dock("Ausgabe", self.output, B, "output")
@@ -215,7 +219,7 @@ class MainWindow(QMainWindow):
         for d in (self.d_errors, self.d_terminal, self.d_bps, self.d_packages, self.d_profiler, self.d_db, self.d_tests, self.d_refs, self.d_locals, self.d_watch, self.d_stack, self.d_imm):
             self.tabifyDockWidget(self.d_output, d)
         self.d_output.raise_()
-        for d in (self.d_explorer, self.d_toolbox, self.d_changes):
+        for d in (self.d_explorer, self.d_toolbox, self.d_changes, self.d_blocks):
             d.setMinimumWidth(LEFT_MIN)             # sonst werden die Reiter-Beschriftungen (»Projektm…«, »To…«) abgeschnitten
         for d in (self.d_chat, self.d_props, self.d_preview, self.d_inspector):
             d.setMinimumWidth(RIGHT_MIN)
@@ -223,7 +227,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.d_chat], [400], Qt.Horizontal)
         self.resizeDocks([self.d_chat, self.d_props], [520, 260], Qt.Vertical)
         self.resizeDocks([self.d_output], [230], Qt.Vertical)
-        self.all_docks = [self.d_db, self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
+        self.all_docks = [self.d_blocks, self.d_db, self.d_profiler, self.d_preview, self.d_inspector, self.d_refs, self.d_tests, self.d_locals, self.d_watch, self.d_stack, self.d_imm, self.d_packages, self.d_chat, self.d_changes, self.d_toolbox, self.d_explorer, self.d_props, self.d_output, self.d_errors, self.d_terminal, self.d_bps]
         QApplication.instance().focusChanged.connect(self._focus_changed)
         self.installEventFilter(self)
         self._update_found.connect(self._on_update_found)
@@ -492,6 +496,11 @@ class MainWindow(QMainWindow):
         self.inspector.flush = self.docs.save_modified_code
         self.inspector.applied.connect(self._web_applied)
         self.inspector.designerControl.connect(self._select_designer_control)
+        self.blocks.insertRequested.connect(lambda block, where: (self.open_preview(), self.inspector.insert_block(block, where)))
+        self.blocks.outlineSelected.connect(lambda path: path and self.preview.eval(f"window.__vds && window.__vds.selectPath({__import__('json').dumps(path)})"))
+        self.blocks.outlineWanted.connect(self.preview.refresh_outline)
+        self.preview.outlineChanged.connect(self.blocks.set_outline)
+        self.preview.picked.connect(lambda d: self.blocks.select_path(d.get("path", "")))
         self.lsp.diagnostics.connect(self._lsp_diagnostics)
         self.lsp.editRequested.connect(lambda edits, label: self._apply_refactor(edits, label, preview=len(edits) > 1))
         self.p_refs.activated.connect(lambda path, line, col: self.goto(path, line, col))
@@ -634,17 +643,18 @@ class MainWindow(QMainWindow):
 
     # --- Web-Vorschau -----------------------------------------------------------------------------------
     def toggle_visual_workspace(self):
-        """Eigene Ansicht zum visuellen Bearbeiten: nur Web-Vorschau (groß) und Web-Element nebeneinander, alles andere ausgeblendet. Nochmal aufrufen stellt das Layout wieder her."""
+        """Eigene Ansicht zum visuellen Bauen: Bausteine/Struktur links, Web-Vorschau (groß) in der Mitte, Web-Element rechts, alles andere ausgeblendet. Nochmal aufrufen stellt das Layout wieder her."""
         if getattr(self, "_visual_state", None) is not None:
             return self._leave_visual_workspace()
         self._visual_state = (self.saveState(), self.docs.isVisible())
         for d in self.all_docks:
             d.hide()
         self.docs.hide()
+        self.d_blocks.setFloating(False); self.addDockWidget(Qt.LeftDockWidgetArea, self.d_blocks); self.d_blocks.show()
         for d in (self.d_preview, self.d_inspector):
             d.setFloating(False); self.addDockWidget(Qt.RightDockWidgetArea, d); d.show()
         self.splitDockWidget(self.d_preview, self.d_inspector, Qt.Horizontal)
-        self.resizeDocks([self.d_preview, self.d_inspector], [max(600, self.width() - 480), 460], Qt.Horizontal)
+        self.resizeDocks([self.d_blocks, self.d_preview, self.d_inspector], [LEFT_MIN, max(500, self.width() - LEFT_MIN - 480), 460], Qt.Horizontal)
         self.preview.set_mode("edit")
         self.statusBar().showMessage("Visueller Web-Editor – Strg+Alt+V beendet die Ansicht", 6000)
 

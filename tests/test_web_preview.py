@@ -290,3 +290,66 @@ def test_save_buttons_follow_pending_changes(qapp, pump, panel, site):
     assert not panel.btn_save.isHidden() and "(1)" in panel.btn_save.text()
     panel.btn_discard.click()
     assert pump(lambda: not ins.pending and panel.btn_save.isHidden(), 10)
+
+
+# --- Bausteine, Struktur, Drag & Drop -----------------------------------------------------------------------------------------
+def test_insert_block_duplicate_move_delete_write_into_the_source(qapp, pump, panel, site, monkeypatch):
+    root, url = site
+    ins = panel.inspector
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    html = lambda: (root / "index.html").read_text()
+    pick(panel, pump, ".box")
+    assert pump(lambda: ins.info and "box" in ins.info["classes"], 10)
+    assert ins.insert_block("heading", "after") and "<h2>Neue Überschrift</h2>" in html()
+    assert html().index('class="box"') < html().index("Neue Überschrift")
+    pick(panel, pump, ".box")
+    assert ins.duplicate() and html().count('class="box"') == 2
+    pick(panel, pump, "#titel")
+    assert pump(lambda: ins.info and ins.info["id"] == "titel", 10)
+    assert ins.delete_element() and 'id="titel"' not in html()
+    assert ins.undo_stack and not panel.btn_undo.isHidden()
+    ins.undo_last()
+    assert 'id="titel"' in html()
+
+
+def test_structure_change_is_refused_while_style_changes_are_pending(qapp, pump, panel, site, monkeypatch):
+    root, _ = site
+    ins = panel.inspector
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+    pick(panel, pump, "#titel")
+    ins.set_style("color", "#123456")
+    assert pump(lambda: ins.pending, 10)
+    before = (root / "index.html").read_text()
+    assert ins.insert_block("divider", "after") == [] and shown and (root / "index.html").read_text() == before
+
+
+def test_dropping_a_block_on_the_page_reports_target_and_position(qapp, pump, panel):
+    got = []
+    panel.insertDropped.connect(got.append)
+    panel.set_mode("edit"); pump(lambda: False, 0.3)
+    js(panel, pump, """(() => { const b = document.querySelector('.box').getBoundingClientRect(), dt = new DataTransfer(); dt.setData('text/plain', 'vds-block:card');
+        document.querySelector('.box').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: b.left + b.width / 2, clientY: b.top + b.height / 2 })); return 1; })()""")
+    assert pump(lambda: got, 10)
+    assert got[0]["block"] == "card" and got[0]["where"] == "inside" and "box" in got[0]["info"]["classes"]
+    js(panel, pump, """(() => { const b = document.querySelector('.box').getBoundingClientRect(), dt = new DataTransfer(); dt.setData('text/plain', 'vds-block:card');
+        document.querySelector('.box').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: b.left + 5, clientY: b.bottom - 2 })); return 1; })()""")
+    assert pump(lambda: len(got) == 2, 10) and got[1]["where"] == "after"
+    js(panel, pump, """(() => { const dt = new DataTransfer(); dt.setData('text/plain', 'irgendein text');
+        document.querySelector('.box').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: 5, clientY: 5 })); return 1; })()""")
+    pump(lambda: False, 0.3)
+    assert len(got) == 2                                                        # fremde Drops werden ignoriert
+
+
+def test_dropped_block_is_written_and_outline_lists_the_page(qapp, pump, panel, site):
+    root, _ = site
+    ins = panel.inspector
+    tree = jsj(panel, pump, "window.__vds.outline()")
+    assert [n["t"] for n in tree] == ["h1", "button", "div"] and tree[0]["i"] == "titel" and tree[2]["k"][0]["c"] == ["inner"]
+    got = []
+    panel.outlineChanged.connect(got.append)
+    panel.refresh_outline()
+    assert pump(lambda: got, 10) and got[0][0]["t"] == "h1"
+    info = jsj(panel, pump, "(() => { const e = document.querySelector('.box'); window.__vds.selectPath('.box'); return window.__vds.selected(); })()")
+    panel.insertDropped.emit({"block": "list", "where": "inside", "info": info})
+    assert "<li>Erster Punkt</li>" in (root / "index.html").read_text()

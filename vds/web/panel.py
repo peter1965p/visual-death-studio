@@ -40,6 +40,9 @@ class PreviewPanel(QWidget):
     pageLoaded = Signal(bool, str)
     ready = Signal(dict)
     saveRequested = Signal()
+    undoRequested = Signal()
+    insertDropped = Signal(dict)         # Baustein auf die Seite gezogen: {block, where, info}
+    outlineChanged = Signal(list)
     discardRequested = Signal()
 
     def __init__(self, parent=None):
@@ -78,8 +81,10 @@ class PreviewPanel(QWidget):
         self.btn_save.clicked.connect(lambda: self.saveRequested.emit())
         self.btn_discard = QPushButton("Verwerfen"); self.btn_discard.setToolTip("Änderungen in der Vorschau zurücknehmen")
         self.btn_discard.clicked.connect(lambda: self.discardRequested.emit())
+        self.btn_undo = QPushButton("↶ Rückgängig"); self.btn_undo.setToolTip("Letzte Änderung am Quellcode zurücknehmen")
+        self.btn_undo.clicked.connect(lambda: self.undoRequested.emit()); self.btn_undo.setVisible(False)
         foot = QHBoxLayout(); foot.setContentsMargins(4, 2, 4, 2); foot.setSpacing(4)
-        foot.addWidget(self.status, 1); foot.addWidget(self.btn_discard); foot.addWidget(self.btn_save)
+        foot.addWidget(self.status, 1); foot.addWidget(self.btn_undo); foot.addWidget(self.btn_discard); foot.addWidget(self.btn_save)
         self.set_pending(0)
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
         lay.addLayout(bar); lay.addWidget(self.scroll, 1); lay.addLayout(foot)
@@ -95,6 +100,18 @@ class PreviewPanel(QWidget):
         """Anzahl der noch nicht in den Quellcode übernommenen Änderungen; die Knöpfe erscheinen nur, wenn es welche gibt."""
         self.btn_save.setVisible(n > 0); self.btn_discard.setVisible(n > 0)
         self.btn_save.setText(f"💾 In Quellcode speichern ({n})" if n else "💾 In Quellcode speichern")
+
+    def set_undo(self, available: bool):
+        self.btn_undo.setVisible(available)
+
+    def refresh_outline(self):
+        """Seitenstruktur (Baum der Elemente) aus der Seite holen."""
+        def done(raw):
+            try:
+                self.outlineChanged.emit(json.loads(raw) if raw else [])
+            except ValueError:
+                pass
+        self.eval("JSON.stringify(window.__vds ? window.__vds.outline() : [])", done)           # Arrays reicht QtWebEngine nicht zuverlässig durch
 
     @staticmethod
     def _tool(text, tip, slot, checkable=False):
@@ -133,6 +150,7 @@ class PreviewPanel(QWidget):
         self.status.setText(f"{'Geladen' if ok else 'Konnte nicht geladen werden'}: {self.view.url().toString()}")
         self.pageLoaded.emit(ok, self.view.url().toString())
         if ok:
+            self.refresh_outline()
             self.set_mode(self.mode, force=True)
             if self._selected_path:
                 self.eval(f"window.__vds && window.__vds.restore({json.dumps(self._selected_path)})")
@@ -162,6 +180,8 @@ class PreviewPanel(QWidget):
             self.textChanged.emit(data)
         elif kind == "ready":
             self.ready.emit(data)
+        elif kind == "insert":
+            self.insertDropped.emit(data)
         elif kind == "hover":
             self.status.setText(data.get("tag", ""))
 

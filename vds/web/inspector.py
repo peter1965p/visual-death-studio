@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from . import source_map, writer
+from . import blocks, markup, source_map, writer
 
 GROUPS = [("Layout", ["display", "position", "width", "height", "margin", "padding", "top", "left", "z-index", "overflow"]),
           ("Flex", ["flex-direction", "justify-content", "align-items", "gap"]),
@@ -91,6 +91,10 @@ class WebInspector(QWidget):
         for text, tip, fn in (("↑ Eltern", "Übergeordnetes Element", lambda: self._rel("parent")), ("↓ Kind", "Erstes Kindelement", lambda: self._rel("child")),
                               ("← Vorher", "Vorheriges Geschwister", lambda: self._rel("prev")), ("→ Nachher", "Nächstes Geschwister", lambda: self._rel("next"))):
             b = QPushButton(text); b.setToolTip(tip); b.clicked.connect(fn); nav.addWidget(b); self.nav_buttons.append(b)
+        srow = QHBoxLayout(); self.struct_buttons = []
+        for text, tip, fn in (("⧉ Duplizieren", "Element kopieren (direkt dahinter einfügen)", self.duplicate), ("✕ Löschen", "Element aus dem Quellcode entfernen", self.delete_element),
+                              ("▲ Hoch", "Mit dem vorherigen Element tauschen", lambda: self.move("up")), ("▼ Runter", "Mit dem nächsten Element tauschen", lambda: self.move("down"))):
+            b = QPushButton(text); b.setToolTip(tip); b.clicked.connect(fn); srow.addWidget(b); self.struct_buttons.append(b)
         self.text_edit = QLineEdit(); self.text_edit.setPlaceholderText("Text des Elements")
         self.text_edit.editingFinished.connect(self._text_changed)
         self.body = body = QWidget(); form_lay = QVBoxLayout(body); form_lay.setContentsMargins(4, 4, 4, 4)
@@ -115,7 +119,7 @@ class WebInspector(QWidget):
         self.btn_undo = QPushButton("Letzte Übernahme rückgängig"); self.btn_undo.clicked.connect(self.undo_last)
         wr = QHBoxLayout(); wr.addWidget(self.btn_write); wr.addWidget(self.btn_discard)
         lay = QVBoxLayout(self); lay.setContentsMargins(6, 6, 6, 6); lay.setSpacing(5)
-        lay.addWidget(self.head); lay.addLayout(nav); lay.addWidget(scroll, 1)
+        lay.addWidget(self.head); lay.addLayout(nav); lay.addLayout(srow); lay.addWidget(scroll, 1)
         lay.addWidget(self.btn_src); lay.addWidget(self.src_list)
         lay.addWidget(QLabel("Nicht übernommene Änderungen:")); lay.addWidget(self.changes); lay.addLayout(wr); lay.addWidget(self.btn_undo)
         panel.picked.connect(self.show_info)
@@ -123,6 +127,8 @@ class WebInspector(QWidget):
         panel.textChanged.connect(self._text_msg)
         panel.saveRequested.connect(lambda: self.write_back())
         panel.discardRequested.connect(self.discard)
+        panel.undoRequested.connect(self.undo_last)
+        panel.insertDropped.connect(lambda d: self.insert_for(d.get("info") or {}, d.get("block", ""), d.get("where", "after")))
         self._set_active(False)
         self._refresh()
 
@@ -144,7 +150,7 @@ class WebInspector(QWidget):
 
     def _set_active(self, on: bool):
         """Ohne gewähltes Element sind Navigation, Stilfelder und „Zum Code springen“ abgeblendet, damit klar ist, dass erst ein Element angeklickt werden muss."""
-        for w in (*self.nav_buttons, self.body, self.btn_src):
+        for w in (*self.nav_buttons, *self.struct_buttons, self.body, self.btn_src):
             w.setEnabled(on)
 
     def _rel(self, kind: str):
@@ -186,7 +192,7 @@ class WebInspector(QWidget):
             self.changes.addItem(f"{describe(info)}: Text „{old[:20]}“ → „{new[:20]}“")
         n = len(self.pending) + len(self.text_pending)
         self.btn_write.setEnabled(n > 0); self.btn_discard.setEnabled(n > 0); self.btn_undo.setEnabled(bool(self.undo_stack))
-        self.panel.set_pending(n)
+        self.panel.set_pending(n); self.panel.set_undo(bool(self.undo_stack))
 
     def discard(self):
         self.panel.eval("window.__vds && window.__vds.revertAll()")
@@ -200,7 +206,7 @@ class WebInspector(QWidget):
             return
         if self.info.get("vds"):
             return self.designerControl.emit(self.info["vds"])
-        self.candidates = source_map.search(self.root, self.info)
+        self.candidates = markup.locate(self.root, self.info) or source_map.search(self.root, self.info)
         self.src_list.clear()
         for c in self.candidates:
             it = QListWidgetItem(c.label(self.root)); it.setData(Qt.UserRole, c); self.src_list.addItem(it)
@@ -212,6 +218,52 @@ class WebInspector(QWidget):
     def _open_candidate(self, c):
         if c is not None:
             self.openFile.emit(str(c.file), c.line)
+
+    # --- Aufbau ändern: einfügen, duplizieren, löschen, umordnen ---------------------------------------------------------------
+    def _structural(self, info: dict, make, title: str) -> list:
+        """make(Match) -> Plan | None für die Stellen, an denen das Element im Quellcode stehen kann; eindeutig → gleich schreiben, sonst Auswahl mit Unterschied."""
+        if not info:
+            QMessageBox.information(self, "Web-Element", "Erst in der Vorschau ein Element auswählen („⌖ Auswählen“ oder „✥ Bearbeiten“ und anklicken)."); return []
+        if self.pending or self.text_pending:
+            QMessageBox.information(self, "Web-Element", "Es gibt noch nicht übernommene Änderungen: erst „In Quellcode speichern“ oder „Verwerfen“."); return []
+        if self.flush:
+            self.flush()
+        pairs = [(m, p) for m in markup.locate(self.root, info) for p in [make(m)] if p]
+        if not pairs:
+            QMessageBox.information(self, "Quellcode", "Dieses Element ist im Quellcode nicht eindeutig zu finden (dynamisch erzeugt oder in einer Schleife?)."); return []
+        if len(pairs) == 1 or pairs[0][0].score - pairs[1][0].score >= 15:
+            chosen = [pairs[0][1]]
+        else:
+            dlg = WriteDialog(self.root, [(title, [p for _, p in pairs])], self)
+            if not dlg.exec():
+                return []
+            chosen = dlg.chosen()
+        files = self.commit(chosen) if chosen else []
+        if files:
+            self.info = None; self._set_active(False); self.head.setText("Kein Element gewählt."); self.panel._selected_path = ""
+            self.panel.set_mode(self.panel.mode, force=True)
+        return files
+
+    def insert_for(self, info: dict, block_id: str, where: str) -> list:
+        html = blocks.snippet(self.root, block_id)
+        if html is None:
+            return []
+        name = next((l for b, l, _ in blocks.BLOCKS if b == block_id), block_id)
+        return self._structural(info, lambda m: markup.insert_plan(m, self.root, html, where, f"Baustein „{name}“ einfügen"), f"{name} einfügen")
+
+    def insert_block(self, block_id: str, where: str = "after") -> list:
+        return self.insert_for(self.info or {}, block_id, where)
+
+    def duplicate(self):
+        return self._structural(self.info or {}, lambda m: markup.duplicate_plan(m, self.root), "Element duplizieren")
+
+    def delete_element(self):
+        if self.info and QMessageBox.question(self, "Element löschen", f"{describe(self.info)} aus dem Quellcode entfernen?\n(Rückgängig ist unter der Vorschau möglich.)") != QMessageBox.Yes:
+            return []
+        return self._structural(self.info or {}, lambda m: markup.delete_plan(m, self.root), "Element löschen")
+
+    def move(self, direction: str):
+        return self._structural(self.info or {}, lambda m: markup.move_plan(m, self.root, direction), "Element verschieben")
 
     # --- Zurückschreiben --------------------------------------------------------------------------------------------------
     def build_plans(self) -> list:

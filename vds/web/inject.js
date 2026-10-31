@@ -10,7 +10,7 @@
   let mode = "off", sel = null, hoverEl = null, drag = null, raf = 0;
   const overrides = new Map();   // Element -> { prop: { old, oldPrio, val } }
   const texts = new Map();       // Element -> ursprünglicher Text
-  let ov, hoverBox, selBox, label, handles = {};
+  let ov, hoverBox, selBox, label, dropBox, handles = {};
 
   const inOverlay = (el) => !!(ov && el && (el === ov || ov.contains(el)));
   const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^\w-]/g, "\\$&");
@@ -76,7 +76,8 @@
     ov = document.createElement("div"); ov.id = "__vds_overlay"; ov.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;";
     hoverBox = box("#00e5ff", "rgba(0,229,255,.12)"); selBox = box("#b44cff", "rgba(180,76,255,.08)"); selBox.style.borderWidth = "2px";
     label = document.createElement("div"); label.style.cssText = "position:fixed;pointer-events:none;background:#0c0f22;color:#dbe6ff;font:11px/1.4 monospace;padding:1px 6px;border-radius:4px;border:1px solid #00e5ff;display:none;white-space:nowrap;";
-    ov.append(hoverBox, selBox, label);
+    dropBox = box("#00ff9c", "rgba(0,255,156,.18)"); dropBox.style.borderWidth = "2px";
+    ov.append(hoverBox, selBox, label, dropBox);
     const dirs = { nw: [-1, -1, "nwse-resize"], n: [0, -1, "ns-resize"], ne: [1, -1, "nesw-resize"], e: [1, 0, "ew-resize"], se: [1, 1, "nwse-resize"], s: [0, 1, "ns-resize"], sw: [-1, 1, "nesw-resize"], w: [-1, 0, "ew-resize"] };
     for (const k in dirs) {
       const h = document.createElement("div"); h.dataset.h = k; h.style.cssText = "position:fixed;width:9px;height:9px;background:#fff;border:1px solid #b44cff;box-sizing:border-box;pointer-events:auto;display:none;cursor:" + dirs[k][2];
@@ -99,6 +100,50 @@
     } else { selBox.style.display = "none"; label.style.display = "none"; for (const k in handles) handles[k].style.display = "none"; }
   }
   const loop = () => { draw(); raf = mode === "off" ? 0 : requestAnimationFrame(loop); };
+
+  // --- Bausteine auf die Seite ziehen ------------------------------------------------------------------
+  const VOID = new Set(["img", "input", "br", "hr", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"]);
+  function dropWhere(el, e) {
+    const r = el.getBoundingClientRect(), y = (e.clientY - r.top) / Math.max(1, r.height);
+    if (el === document.body || el === document.documentElement) return "inside";
+    if (VOID.has(el.tagName.toLowerCase())) return y < 0.5 ? "before" : "after";
+    return y < 0.25 ? "before" : y > 0.75 ? "after" : "inside";
+  }
+  function showDrop(el, where) {
+    const r = el.getBoundingClientRect();
+    place(dropBox, where === "before" ? { left: r.left, top: r.top - 2, width: r.width, height: 4 } : where === "after" ? { left: r.left, top: r.bottom - 2, width: r.width, height: 4 } : r);
+    dropBox.style.background = where === "inside" ? "rgba(0,255,156,.18)" : "#00ff9c";
+  }
+  const hideDrop = () => { if (dropBox) dropBox.style.display = "none"; };
+  const isBlock = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].some((t) => t === "text/plain" || t === "Text");
+  document.addEventListener("dragover", (e) => {
+    if (mode !== "edit" || !isBlock(e)) return;
+    const t = target(e); if (!t) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "copy"; build(); showDrop(t, dropWhere(t, e));
+  }, true);
+  document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) hideDrop(); }, true);
+  document.addEventListener("drop", (e) => {
+    if (mode !== "edit") return;
+    const d = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || ""; hideDrop();
+    if (!d.startsWith("vds-block:")) return;
+    const t = target(e); if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    send("insert", { block: d.slice(10), where: dropWhere(t, e), info: info(t) });
+  }, true);
+
+  const SKIP = new Set(["script", "style", "noscript", "template", "link", "meta", "head", "title"]);
+  function outline() {
+    let count = 0;
+    const walk = (el, depth) => {
+      if (count > 800 || depth > 14) return null;
+      const tag = el.tagName.toLowerCase(); if (SKIP.has(tag) || inOverlay(el)) return null;
+      count++;
+      const n = { p: cssPath(el), t: tag, i: el.id || "", c: [...el.classList].slice(0, 3), x: el.children.length ? "" : ownText(el).slice(0, 30), k: [] };
+      for (const c of el.children) { const k = walk(c, depth + 1); if (k) n.k.push(k); }
+      return n;
+    };
+    const r = walk(document.body, 0); return r ? r.k : [];
+  }
 
   function select(el, quiet) { sel = el; draw(); if (!quiet && el) send("pick", info(el)); }
 
@@ -187,7 +232,8 @@
 
   window.__vds = {
     setMode, info, find,
-    selectPath(p) { const el = find(p); if (el) select(el); return !!el; },
+    selectPath(p) { const el = find(p); if (el) { select(el); el.scrollIntoView({ block: "nearest", inline: "nearest" }); } return !!el; },
+    outline,
     selectRelative(kind) {
       if (!sel) return false; let n = null;
       if (kind === "parent") n = sel.parentElement; else if (kind === "child") n = sel.firstElementChild; else if (kind === "next") n = sel.nextElementSibling; else if (kind === "prev") n = sel.previousElementSibling;
