@@ -22,6 +22,7 @@ class Plan:
     file: Path
     old: str
     new: str
+    shared: int = 0    # >1: die Regel gilt für so viele Elemente der Seite
 
     def diff(self, root: Path | None = None) -> str:
         name = str(self.file.relative_to(root)) if root and root in self.file.parents else self.file.name
@@ -175,8 +176,19 @@ def sheet_files(root: Path, sheets: list | None) -> list:
     return out
 
 
+def rule_reach(selector: str, ident: str, classes: list, counts: dict) -> int:
+    """Für wie viele Elemente der Seite gilt die Regel höchstens? (Obergrenze aus den Klassenzahlen; 1 = nur dieses Element)"""
+    best = 1
+    for s in (x.strip() for x in selector.split(",")):
+        if rule_matches(s, ident, classes) and "#" not in s:
+            rc = [c for c in s.split("#")[0].split(".")[1:] if c]
+            if rc:
+                best = max(best, min(counts.get(c, 1) for c in rc))
+    return best
+
+
 def css_plans(root: Path, info: dict, props: dict) -> list:
-    ident, classes = info.get("id", ""), info.get("classes", [])
+    ident, classes, counts = info.get("id", ""), info.get("classes", []), info.get("classCounts") or {}
     plans = []
     loaded = sheet_files(root, info.get("sheets"))
     files = sm.project_files(root, sm.STYLE_EXT | {".vue", ".svelte", ".html", ".htm", ".php", ".astro"})
@@ -196,12 +208,23 @@ def css_plans(root: Path, info: dict, props: dict) -> list:
                     continue
                 new_body = set_decls(text[r.start:r.end], props)
                 new = text[:r.start] + new_body + text[r.end:]
-                plans.append(Plan("css-regel", f"Regel „{r.selector}“ ändern  ({f.relative_to(root)}:{r.line})", f, text, new))
+                reach = rule_reach(r.selector, ident, classes, counts)
+                note = f"  ⚠ gilt für {reach} Elemente der Seite" if reach > 1 else ""
+                plans.append(Plan("css-regel", f"Regel „{r.selector}“ ändern  ({f.relative_to(root)}:{r.line}){note}", f, text, new, reach if reach > 1 else 0))
     return plans
 
 
+def unique_selector(info: dict) -> str:
+    """Klassen-Selektor nur für dieses Element: die seltenste Klasse, sonst alle zusammen (z. B. .btn.btn-primary.btn-lg statt .btn)."""
+    cls, counts = info.get("stableClasses") or [], info.get("classCounts") or {}
+    if not cls:
+        return ""
+    rare = min(cls, key=lambda c: counts.get(c, 1))
+    return "." + rare if counts.get(rare, 1) <= 1 else "".join("." + c for c in cls)
+
+
 def new_rule_plan(root: Path, info: dict, props: dict) -> Plan | None:
-    sel = f"#{info['id']}" if info.get("id") else ("." + info["stableClasses"][0] if info.get("stableClasses") else "")
+    sel = f"#{info['id']}" if info.get("id") else unique_selector(info)
     if not sel:
         return None
     body = "".join(f"\n  {kebab(k)}: {v};" for k, v in props.items())
@@ -426,13 +449,15 @@ def plan_style(root: Path, info: dict, props: dict, cands: list | None = None) -
     if best:
         tw = tailwind_plan(root, best, props)
         tw and plans.append(tw)
-    plans += css_plans(root, info, props)
+    rules = css_plans(root, info, props)
+    plans += [p for p in rules if not p.shared]
     if best:
         il = inline_plan(root, best, props)
         il and plans.append(il)
-    if not any(p.kind == "css-regel" for p in plans):
+    plans += [p for p in rules if p.shared]                    # gemeinsame Regeln (.btn-lg …) ändern auch andere Elemente: nur als letzte Wahl
+    if not any(p.kind == "css-regel" and not p.shared for p in plans):
         nr = new_rule_plan(root, info, props)
-        nr and plans.append(nr)
+        nr and plans.insert(next((i for i, p in enumerate(plans) if p.shared), len(plans)), nr)
     return plans
 
 

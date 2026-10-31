@@ -326,6 +326,7 @@ class MainWindow(QMainWindow):
             webreload=A("Web-Vorschau neu laden", lambda: self.preview.reload(), "Ctrl+Alt+R"),
             webpick=A("Web-Element auswählen", lambda: (self.open_preview(), self.preview.set_mode("pick")), "Ctrl+Alt+E"),
             webedit=A("Web-Seite visuell bearbeiten", lambda: (self.open_preview(), self.preview.set_mode("edit")), "Ctrl+Alt+B"),
+            webvisual=A("Visueller Web-Editor (eigene Ansicht)", lambda: self.toggle_visual_workspace(), "Ctrl+Alt+V"),
             webwrite=A("Web-Änderungen in den Quellcode übernehmen…", lambda: self.inspector.write_back(), "Ctrl+Alt+S"),
             editorfont=A("Editor-Schrift…", self.pick_editor_font),
             cmpfiles=A("Dateien vergleichen…", self.compare_files),
@@ -373,7 +374,7 @@ class MainWindow(QMainWindow):
         v.addSeparator()
         v.addAction(a["viewcode"]); v.addAction(a["viewdesigner"])
         v.addSeparator()
-        for k in ("webopen", "webreload", "webpick", "webedit", "webwrite"):
+        for k in ("webopen", "webreload", "webpick", "webedit", "webvisual", "webwrite"):
             v.addAction(a[k])
         v.addSeparator()
         v.addAction(a["reset"])
@@ -632,6 +633,27 @@ class MainWindow(QMainWindow):
             self.m_recent.addAction("(noch keine)").setEnabled(False)
 
     # --- Web-Vorschau -----------------------------------------------------------------------------------
+    def toggle_visual_workspace(self):
+        """Eigene Ansicht zum visuellen Bearbeiten: nur Web-Vorschau (groß) und Web-Element nebeneinander, alles andere ausgeblendet. Nochmal aufrufen stellt das Layout wieder her."""
+        if getattr(self, "_visual_state", None) is not None:
+            return self._leave_visual_workspace()
+        self._visual_state = (self.saveState(), self.docs.isVisible())
+        for d in self.all_docks:
+            d.hide()
+        self.docs.hide()
+        for d in (self.d_preview, self.d_inspector):
+            d.setFloating(False); self.addDockWidget(Qt.RightDockWidgetArea, d); d.show()
+        self.splitDockWidget(self.d_preview, self.d_inspector, Qt.Horizontal)
+        self.resizeDocks([self.d_preview, self.d_inspector], [max(600, self.width() - 480), 460], Qt.Horizontal)
+        self.preview.set_mode("edit")
+        self.statusBar().showMessage("Visueller Web-Editor – Strg+Alt+V beendet die Ansicht", 6000)
+
+    def _leave_visual_workspace(self):
+        state, docs_visible = self._visual_state
+        self._visual_state = None
+        self.restoreState(state)
+        self.docs.setVisible(docs_visible)
+
     def open_preview(self):
         self.d_preview.show(); self.d_preview.raise_()
         self.d_inspector.show(); self.d_inspector.raise_()
@@ -1700,6 +1722,8 @@ class MainWindow(QMainWindow):
         self.lsp.shutdown()
         if not self.docs.close_all():
             return e.ignore()
+        if getattr(self, "_visual_state", None) is not None:
+            self._leave_visual_workspace()                     # sonst würde die ausgeblendete Ansicht als Layout gespeichert
         self.settings.setValue("root", "" if self.root == empty_root() else str(self.root))
         self.runner.stop()
         self.preview.shutdown()

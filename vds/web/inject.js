@@ -36,6 +36,10 @@
 
   function sheets() { const o = []; for (const s of document.styleSheets) { try { if (s.href && o.length < 30) o.push(new URL(s.href).pathname); } catch (e) { /* nichts */ } } return o; }
 
+  function classCounts(el) {      // wie viele Elemente der Seite jede Klasse tragen (gemeinsame Regeln wie .btn-lg betreffen mehrere)
+    const o = {}; for (const c of el.classList) { try { o[c] = document.querySelectorAll("." + esc(c)).length; } catch (e) { o[c] = 1; } } return o;
+  }
+
   function info(el) {
     const cs = getComputedStyle(el), r = el.getBoundingClientRect(), computed = {};
     for (const p of PROPS) computed[p] = cs.getPropertyValue(p);
@@ -46,7 +50,7 @@
     return { path: cssPath(el), tag: el.tagName.toLowerCase(), id: el.id || "", classes: [...el.classList],
       stableClasses: [...el.classList].filter((c) => !generated(c)), text: ownText(el).slice(0, 160), attrs, inline: el.getAttribute("style") || "",
       rect: { x: r.x, y: r.y, w: r.width, h: r.height }, computed, chain, children: el.children.length, vds: v ? v.getAttribute("data-vds") : "",
-      html: el.outerHTML.slice(0, 400), overrides: overridesOf(el), sheets: sheets() };
+      html: el.outerHTML.slice(0, 400), overrides: overridesOf(el), sheets: sheets(), classCounts: classCounts(el) };
   }
   function overridesOf(el) { const m = overrides.get(el), o = {}; if (m) for (const k in m) o[k] = m[k].val; return o; }
 

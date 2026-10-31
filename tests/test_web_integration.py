@@ -271,3 +271,14 @@ def test_written_changes_reload_open_editor_tab_and_unsaved_edits_are_flushed_fi
     text = css.read_text()
     win.inspector.commit([writer.Plan("css-regel", "x", css.resolve(), text, text.replace("red", "blue"))])
     assert "blue" in css.read_text() and "blue" in ed.toPlainText()    # Tab zeigt die geschriebene Fassung
+
+
+def test_visual_workspace_shows_only_preview_and_inspector_and_restores(win, pump):
+    win.show(); win.resize(1600, 900)
+    before = {d: d.isVisible() for d in win.all_docks}
+    win.a["webvisual"].trigger()
+    assert win.d_preview.isVisible() and win.d_inspector.isVisible() and not win.docs.isVisible()
+    assert not win.d_explorer.isVisible() and win.preview.mode == "edit"
+    assert pump(lambda: win.d_preview.width() > win.d_inspector.width() and win.d_inspector.width() < 700, 5)
+    win.a["webvisual"].trigger()
+    assert win.docs.isVisible() and win.d_explorer.isVisible() == before[win.d_explorer]

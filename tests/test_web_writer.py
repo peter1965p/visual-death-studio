@@ -223,3 +223,18 @@ def test_existing_rule_in_loaded_sheet_is_offered_first(tmp_path):
     info = {"tag": "p", "id": "", "classes": ["x"], "stableClasses": ["x"], "sheets": ["/app.css"]}
     plans = writer.css_plans(tmp_path.resolve(), info, {"color": "#000"})
     assert [p.file.parent.name for p in plans] == ["public", "resources"]
+
+
+def test_shared_class_rule_is_last_choice_and_new_rule_is_unique(tmp_path):
+    """.btn-lg gilt für zwei Buttons: Verschieben darf nicht dort landen (Überschneidung, falsches Element)."""
+    (tmp_path / "public").mkdir()
+    (tmp_path / "public" / "app.css").write_text(".btn-lg { padding: 1rem; }\n")
+    (tmp_path / "home.html").write_text('<a class="btn btn-primary btn-lg" href="/a">A</a>\n<a class="btn btn-ghost btn-lg" href="/b">B</a>\n')
+    info = {"tag": "a", "id": "", "classes": ["btn", "btn-primary", "btn-lg"], "stableClasses": ["btn", "btn-primary", "btn-lg"],
+            "classCounts": {"btn": 2, "btn-primary": 1, "btn-lg": 2}, "text": "A", "sheets": ["/app.css"]}
+    plans = writer.plan_style(tmp_path, info, {"left": "5px", "top": "7px"})
+    kinds = [p.kind for p in plans]
+    assert kinds[0] == "inline" and plans[-1].kind == "css-regel" and plans[-1].shared == 2 and "gilt für 2 Elemente" in plans[-1].label
+    assert ".btn-primary {" in writer.new_rule_plan(tmp_path, info, {"left": "5px"}).new
+    both = {**info, "classCounts": {"btn": 2, "btn-primary": 2, "btn-lg": 2}}
+    assert ".btn.btn-primary.btn-lg {" in writer.new_rule_plan(tmp_path, both, {"left": "5px"}).new
