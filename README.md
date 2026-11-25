@@ -54,8 +54,17 @@ Eine Laravel-, PHP-, React-, Vue-, Angular- oder reine HTML-Seite öffnen, in de
 
 ![Formular-Designer](docs/designer.png)
 
-- **Formular-Designer** mit Toolbox: 48 Steuerelemente in 7 Kategorien, Suche, A–Z-Liste; Dialoge wie Datei öffnen/speichern, Ordner, Farbe, Schrift, Drucken, Druckvorschau und MessageBox als Komponentenleiste; Eigenschaften, Farben, Schriften
+- **Formular-Designer** mit Toolbox: 50 Steuerelemente in 7 Kategorien (neu: Navigationsleiste und Unterformular für Datenformulare), Suche, A–Z-Liste; Dialoge wie Datei öffnen/speichern, Ordner, Farbe, Schrift, Drucken, Druckvorschau und MessageBox als Komponentenleiste; Eigenschaften, Farben, Schriften
 - **Verschachtelung und Layouts:** Controls in GroupBox, Panel und TabWidget ziehen; Layouts (vertikal, horizontal, Raster) für Formular und Container
+- **Datenformulare – besser als Access:** Im Datenbank-Explorer eine Tabelle rechts anklicken → **„Formular aus Tabelle“**. Heraus kommt ein fertiges Formular, das F5 sofort mit echten Daten startet:
+  - Spaltentypen werden zu passenden Feldern (Text, Zahl, Datum mit Kalender, Häkchen, mehrzeilig) – bei SQLite entscheiden auch die gespeicherten Werte mit; Pflichtfelder aus NOT NULL
+  - Fremdschlüssel werden zu **Auswahllisten mit Klartext** („Vins et alcools Chevalier“ statt „VINET“), Tabellen, die auf diese verweisen, zu **Unterformularen** (z. B. Bestellung → Positionen, dort Produkte ebenfalls im Klartext); Zeilen per Rechtsklick hinzufügen und löschen
+  - **Navigationsleiste:** blättern, Suche über alle Textfelder, Neu, Speichern (Strg+S), Löschen; ungespeicherte Änderungen werden nie stillschweigend verworfen
+  - **Löschen mit Folgen-Analyse:** zeigt, was daran hängt („3 Zeilen in Order Details“), und bietet an, abhängige Zeilen in einer Transaktion mitzulöschen – bei SQLite sind Fremdschlüssel eingeschaltet
+  - Prüfung vor dem Speichern (Pflichtfelder, Zahlen auch mit Komma); Datumswerte behalten ihr Speicherformat
+  - Alles bleibt normales Designer-Material: Felder verschieben, umbenennen, Bindung im Eigenschaftenfenster unter *Daten → Feld* ändern (gebundene Felder sind im Designer orange markiert)
+  - **Kein Laufzeit-Käfig:** Erzeugt wird gewöhnlicher PySide6-Code plus `vds_data.py` neben dem Formular – läuft ohne VDS, liegt sauber in Git (statt einer .accdb). Kennwörter stehen nie im Code: `VDS_DB_PASSWORD` oder Abfrage beim Start
+  - Datenbanken: SQLite, PostgreSQL, MySQL/MariaDB (Fremdschlüssel aus dem Katalog). Datenbindung gibt es für das Ziel Python/Qt; React, Vue, Angular und Swing erzeugen die Oberfläche ohne Bindung
 - **Mehrere Plattformen aus einem Formular:** **Python/Qt**, **Java Swing**, **React (TSX)**, **Vue 3** oder **Angular**; Layouts werden zu Flex/Grid-CSS bzw. Swing-Layout-Managern, Ereignisse zu Props/Emits bzw. überschreibbaren Java-Methoden
 
 ---

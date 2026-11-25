@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
 from PySide6.QtSql import QSql, QSqlDatabase, QSqlQuery, QSqlQueryModel
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QSpinBox, QSplitter, QTableView, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -124,6 +124,8 @@ class ConnectDialog(QDialog):
 
 
 class DatabasePanel(QWidget):
+    formRequested = Signal(str)        # Tabelle → „Formular aus Tabelle“ (die IDE legt es im Projekt an)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.root = Path(".")
@@ -136,6 +138,11 @@ class DatabasePanel(QWidget):
         self.combo.activated.connect(self._pick)
         self.info = QLabel("Nicht verbunden."); self.info.setObjectName("sub"); self.info.setWordWrap(True)
         self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Objekte", "Typ"]); self.tree.itemDoubleClicked.connect(self._select_all)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu); self.tree.customContextMenuRequested.connect(self._menu)
+        self.b_form = QPushButton("📋 Formular aus Tabelle"); self.b_form.setEnabled(False)
+        self.b_form.setToolTip("Fertiges Datenformular aus der gewählten Tabelle: Felder, Auswahllisten für Fremdschlüssel, Unterformulare")
+        self.b_form.clicked.connect(lambda: self._form_for(self.tree.currentItem()))
+        self.tree.currentItemChanged.connect(lambda it, _p: self.b_form.setEnabled(self._table_of(it) is not None))
         self.sql = QPlainTextEdit(); self.sql.setPlaceholderText("SQL eingeben – Strg+Enter führt den markierten Text bzw. alles aus")
         self.sql.setFixedHeight(90)
         self.sql.keyPressEvent = self._sql_key(self.sql.keyPressEvent)
@@ -144,7 +151,7 @@ class DatabasePanel(QWidget):
         right = QWidget(); rl = QVBoxLayout(right); rl.setContentsMargins(0, 0, 0, 0)
         rl.addWidget(self.sql); rl.addWidget(self.b_run); rl.addWidget(self.table, 1)
         sp = QSplitter(); sp.addWidget(self.tree); sp.addWidget(right); sp.setStretchFactor(1, 3)
-        top = QHBoxLayout(); top.addWidget(self.combo, 1); top.addWidget(self.b_connect); top.addWidget(self.b_close)
+        top = QHBoxLayout(); top.addWidget(self.combo, 1); top.addWidget(self.b_connect); top.addWidget(self.b_close); top.addWidget(self.b_form)
         lay = QVBoxLayout(self); lay.setContentsMargins(6, 6, 6, 6)
         lay.addLayout(top); lay.addWidget(self.info); lay.addWidget(sp, 1)
         self._fill_combo()
@@ -237,6 +244,28 @@ class DatabasePanel(QWidget):
             for cn, ct, pk in cols:
                 QTreeWidgetItem(top, [("🔑 " if pk else "") + cn, ct])
         self.info.setText(f"Verbunden mit {self.conn.label()} · {len(objs)} Tabellen/Sichten (Doppelklick zeigt den Inhalt)")
+
+    def _table_of(self, item):
+        """Name der Tabelle zum Eintrag (auch für eine Spalte darunter); Sichten haben keine Formulare."""
+        if item is None:
+            return None
+        top = item if item.parent() is None else item.parent()
+        return top.data(0, Qt.UserRole) if top.text(1) == "Tabelle" else None
+
+    def _form_for(self, item):
+        t = self._table_of(item)
+        if t:
+            self.formRequested.emit(t)
+
+    def _menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        item = self.tree.itemAt(pos)
+        if self._table_of(item) is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("📋 Formular aus Tabelle erstellen …", lambda: self._form_for(item))
+        menu.addAction("Inhalt anzeigen", lambda: self._select_all(item if item.parent() is None else item.parent()))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _select_all(self, item, _col=0):
         name = item.data(0, Qt.UserRole)

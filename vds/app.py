@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
         self.d_packages = self._dock("Pakete", self.packages, B, "packages")
         self.dbpanel = DatabasePanel()
         self.d_db = self._dock("Datenbank", self.dbpanel, B, "database")
+        self.dbpanel.formRequested.connect(self.new_data_form)
         self.profiler = ProfilerPanel()
         self.d_profiler = self._dock("Profiler", self.profiler, B, "profiler")
         self.p_locals, self.p_watch, self.p_stack, self.p_imm = VariablesTree(), WatchPanel(), CallStackPanel(), ImmediatePanel()
@@ -1685,6 +1686,33 @@ class MainWindow(QMainWindow):
             return QMessageBox.warning(self, "Visual Death Studio", f"'{name}' existiert bereits.")
         codegen.write_files(path, model)
         self.docs.open(path)
+
+    def new_data_form(self, table: str):
+        """Formular aus Tabelle: fertiges Datenformular (Python/Qt) neben den anderen Formularen im Projekt."""
+        from PySide6.QtWidgets import QInputDialog
+        from .designer import dataform
+        if self.dbpanel.db is None:
+            return
+        if self.root is None or not Path(self.root).is_dir():
+            return QMessageBox.information(self, "Visual Death Studio", "Erst ein Projekt öffnen – das Formular wird dort angelegt.")
+        base = re.sub(r"\W", "", re.sub(r"[\s_]+(\w)", lambda m: m.group(1).upper(), table.title() if table.islower() else table)) or "Daten"
+        name, ok = QInputDialog.getText(self, "Formular aus Tabelle", f"Name des Formulars für „{table}“:", text=f"{base}Form")
+        if not ok:
+            return
+        name = name.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            return QMessageBox.warning(self, "Visual Death Studio", "Der Name muss ein gültiger Bezeichner sein (Buchstaben, Ziffern, Unterstrich).")
+        folder = self.explorer._target_dir()
+        path = folder / f"{name}{FORM_SUFFIX}"
+        if path.exists() or (folder / f"{name}.py").exists():
+            return QMessageBox.warning(self, "Visual Death Studio", f"'{name}' existiert bereits.")
+        try:
+            model = dataform.form_from_table(self.dbpanel.db, self.dbpanel.conn, table, name, folder)
+        except Exception as e:  # noqa: BLE001 – Schemafehler lesbar melden statt abstürzen
+            return QMessageBox.warning(self, "Formular aus Tabelle", f"Die Tabelle ließ sich nicht auswerten:\n{e}")
+        codegen.write_files(path, model)
+        self.docs.open(path)
+        self.statusBar().showMessage(f"Formular {name} aus „{table}“ erstellt – F5 startet es mit echten Daten.", 8000)
 
     def _add_control(self, ctype):
         d = self.docs.current_doc()

@@ -79,6 +79,13 @@ class Overlay(QWidget):
                 p.setBrush(Qt.NoBrush)
         for r in c.handle_rects().values():
             p.setPen(QColor("black")); p.setBrush(QColor("white")); p.drawRect(r)
+        if c.model.get("data"):                     # Datenbindung sichtbar machen: kleines „⛁ Feld“ rechts unten
+            f = p.font(); f.setPointSize(7); p.setFont(f); p.setPen(QColor("#ff9f1c"))
+            for ctl in c.model["controls"]:
+                fld = ctl["props"].get("field") or (ctl["props"].get("sub_table") if ctl["type"] == "SubForm" else "")
+                if fld and c._visible(ctl["name"]):
+                    r = c.canvas_rect(ctl["name"])
+                    p.drawText(r.adjusted(0, 0, -3, 12), Qt.AlignRight | Qt.AlignBottom, "⛁ " + fld)
         p.setPen(QPen(GUIDE, 1))
         for kind, v in c.guides:
             if kind == "v":
@@ -157,6 +164,9 @@ class Canvas(QWidget):
         w = make_widget(c["type"], c["props"], self._holder(c.get("parent"), layouts.tab_of(c, parent)))
         w.setAttribute(Qt.WA_TransparentForMouseEvents)
         w.setFocusPolicy(Qt.NoFocus)
+        for ch in w.findChildren(QWidget):          # zusammengesetzte Controls (Navigationsleiste): Knöpfe dürfen im Designer nicht klicken
+            ch.setAttribute(Qt.WA_TransparentForMouseEvents)
+            ch.setFocusPolicy(Qt.NoFocus)
         if c["type"] == "TabWidget":
             pages = []
             for t in layouts.tab_titles(c["props"]):

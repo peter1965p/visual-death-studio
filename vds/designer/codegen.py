@@ -131,10 +131,26 @@ def _emit_level(L: list, model: dict, parent: dict | None, root_var: str):
         L += _layout_lines(holder, src, kids)
 
 
+def _data_imports(model: dict) -> str:
+    """Datenformulare: Navigationsleiste und Bindung kommen aus vds_data.py (liegt neben dem Formular)."""
+    names = (["DataNavigator"] if any(c["type"] == "DataNavigator" for c in model["controls"]) else []) + (["FormBinding"] if model.get("data") else [])
+    return f"from vds_data import {', '.join(names)}\n" if names else ""
+
+
+def uses_data(model: dict) -> bool:
+    return bool(_data_imports(model))
+
+
+def write_runtime(folder: Path):
+    """Legt vds_data.py neben das Formular (immer aktuell, wie die _designer-Datei)."""
+    src = (Path(__file__).parent / "vds_data.py").read_text(encoding="utf-8")
+    (folder / "vds_data.py").write_text(src, encoding="utf-8")
+
+
 def designer_source(model: dict, cls: str) -> str:
     layouts.normalize(model)
     L = [HEADER, "from PySide6.QtCore import Qt\nfrom PySide6.QtGui import QColor, QFont, QPalette, QPixmap\n",
-         widget_imports(model), "\n\n",
+         widget_imports(model), _data_imports(model), "\n\n",
          f"class Ui_{cls}:\n", "    def setup_ui(self, root):\n",
          f"        root.setObjectName({cls!r})\n", f"        root.setWindowTitle({model['title']!r})\n",
          f"        root.resize({model['width']}, {model['height']})\n"]
@@ -142,6 +158,8 @@ def designer_source(model: dict, cls: str) -> str:
     if model.get("back_color"):
         L.append(f"        _p = root.palette(); _p.setColor(QPalette.Window, QColor({model['back_color']!r})); root.setPalette(_p); root.setAutoFillBackground(True)\n")
     _emit_level(L, model, None, "root")
+    from .dataform import binding_lines
+    L += [("        " + line).rstrip() + "\n" for line in binding_lines(model)]
     comps = model.get("components", [])
     if comps:
         L.append("\n        # --- Komponenten (nicht sichtbar): mit exec() anzeigen\n")
@@ -180,6 +198,8 @@ def write_files(form_path: Path, model: dict) -> Path:
     if targets.target_of(model) != targets.DEFAULT:                 # Java Swing, React, Vue
         return targets.write(form_path, model)
     (form_path.parent / f"{stem}_designer.py").write_text(designer_source(model, cls), encoding="utf-8")
+    if uses_data(model):
+        write_runtime(form_path.parent)
     user = form_path.parent / f"{stem}.py"
     if not user.exists():
         user.write_text(user_source(stem, cls), encoding="utf-8")

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QColorDialog, QFileDialog, QFontDialog, QInputDia
                                QListWidget, QMenuBar, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QScrollBar, QSlider, QSpinBox, QStatusBar,
                                QTableView, QTableWidget, QTabWidget, QTextBrowser, QTimeEdit, QToolButton, QTreeView, QTreeWidget, QTreeWidgetItem)
 from .layouts import LAYOUT_DEFAULTS, LAYOUT_KEYS, LAYOUTS
+from .vds_data import DataNavigator
 
 from PySide6.QtPrintSupport import QPageSetupDialog, QPrintDialog, QPrintPreviewDialog
 
@@ -80,6 +81,8 @@ SPECS = [
     Spec("ListView", QListView, (150, 100), "listView", [], {}, None, "Daten"),
     Spec("TableView", QTableView, (300, 150), "tableView", [], {}, None, "Daten"),
     Spec("TreeView", QTreeView, (200, 150), "treeView", [], {}, None, "Daten"),
+    Spec("DataNavigator", DataNavigator, (560, 34), "dataNavigator", [], {}, None, "Daten"),
+    Spec("SubForm", QTableView, (500, 190), "subForm", ["sub_table", "link", "master"], {"sub_table": "", "link": "", "master": ""}, None, "Daten"),
     Spec("PictureBox", QLabel, (120, 90), "pictureBox", ["image"], {"image": ""}, None, "Anzeige", ("QPixmap",)),
     # --- Menüs und Leisten
     Spec("MenuBar", QMenuBar, (300, 26), "menuBar", ["items"], {"items": ["Datei", "Bearbeiten", "Hilfe"]}, None, "Menüs und Leisten"),
@@ -109,6 +112,11 @@ SPECS = [
     Spec("TabWidget", QTabWidget, (260, 160), "tabControl", ["tabs", "current", *LAYOUT_KEYS],
          {"tabs": ["Tab 1", "Tab 2"], "current": 0, **LAYOUT_DEFAULTS}, ("currentChanged", "tab_changed", ["index"]), "Container"),
 ]
+# Steuerelemente mit Datenbindung: Eigenschaft „Feld“ (nur sichtbar, wenn das Formular eine Datenquelle hat)
+BINDABLE = ("TextBox", "RichTextBox", "CheckBox", "ComboBox", "DateEdit", "DateTimeEdit", "NumericUpDown", "DoubleSpinBox")
+for _s in SPECS:
+    if _s.type in BINDABLE:
+        _s.props = _s.props + ["field"]
 CATEGORIES = ["Allgemeine Steuerelemente", "Eingabe", "Anzeige", "Daten", "Menüs und Leisten", "Dialoge", "Container"]
 BY_TYPE = {s.type: s for s in SPECS}
 
@@ -132,13 +140,15 @@ PROP_INFO = {
     "filter": ("Filter", "str", "Daten"), "directory": ("Startordner", "str", "Daten"), "multiselect": ("Mehrfachauswahl", "bool", "Verhalten"),
     "default_suffix": ("Standard-Endung", "str", "Daten"), "color": ("Startfarbe", "color", "Daten"), "label": ("Beschriftung", "str", "Darstellung"),
     "icon": ("Symbol", "choice", "Darstellung"), "buttons": ("Schaltflächen", "choice", "Verhalten"),
+    "field": ("Feld (Datenquelle)", "field", "Daten"), "sub_table": ("Tabelle", "str", "Daten"),
+    "link": ("Verknüpft über (Spalten)", "str", "Daten"), "master": ("Feld im Hauptformular", "str", "Daten"),
     "minimum": ("Minimum", "int", "Daten"), "maximum": ("Maximum", "int", "Daten"), "value": ("Value", "int", "Daten"),
 }
 CHOICES = {"orientation": ["Horizontal", "Vertical"], "alignment": ["Links", "Mitte", "Rechts"], "layout": LAYOUTS,
            "icon": ["Information", "Warning", "Critical", "Question"], "buttons": ["Ok", "OkCancel", "YesNo", "YesNoCancel"]}
 
 
-KIND_DEFAULT = {"str": "", "int": 0, "bool": False, "items": [], "choice": "", "color": "", "font": ""}
+KIND_DEFAULT = {"field": "", "str": "", "int": 0, "bool": False, "items": [], "choice": "", "color": "", "font": ""}
 
 
 def new_props(spec: Spec, name: str) -> dict:

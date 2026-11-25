@@ -198,6 +198,13 @@ class PropertiesDock(QWidget):
             self._row("Ziel", self._edit("choice", targets.LABELS[targets.target_of(m)], lambda v: cv.set_prop(None, "target", ids.get(v, targets.DEFAULT)), list(ids)))
             self._row("Font", self._edit("font", m.get("font", ""), lambda v: cv.set_prop(None, "font", v)))
             self._row("BackColor", self._edit("color", m.get("back_color", ""), lambda v: cv.set_prop(None, "back_color", v)))
+            if m.get("data"):
+                d = m["data"]
+                conn = d.get("connection", {})
+                self._section("Datenquelle")
+                self._row("Verbindung", self._edit("str", conn.get("name") or conn.get("database", ""), lambda v: None, readonly=True))
+                self._row("Tabelle", self._edit("str", d.get("table", ""), lambda v: None, readonly=True))
+                self._row("Schlüssel", self._edit("str", ", ".join(d.get("key", [])), lambda v: None, readonly=True))
             self._section("Layout")
             self._row("Width", self._edit("int", m["width"], lambda v: cv.set_prop(None, "width", v)))
             self._row("Height", self._edit("int", m["height"], lambda v: cv.set_prop(None, "height", v)))
@@ -222,7 +229,13 @@ class PropertiesDock(QWidget):
             if cat in cats:
                 self._section(cat)
                 for k, label, kind in cats[cat]:
-                    self._row(label, self._edit(kind, c["props"].get(k, KIND_DEFAULT[kind]), lambda v, k=k: cv.set_prop(cid, k, v), CHOICES.get(k)))
+                    choices = CHOICES.get(k)
+                    if kind == "field":                            # Datenbindung: nur in Formularen mit Datenquelle
+                        data = cv.model.get("data")
+                        if not data:
+                            continue
+                        kind, choices = "choice", [""] + [col["name"] for col in data.get("columns", [])]
+                    self._row(label, self._edit(kind, c["props"].get(k, ""), lambda v, k=k: cv.set_prop(cid, k, v), choices))
 
     def _rename(self, cid, v):
         v = v.strip()
