@@ -33,7 +33,7 @@ def run_generated(tmp_path, m, expr):
         app = QApplication([]); f = F(); f.show(); app.processEvents()
         print({expr})
     ''')
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={"QT_QPA_PLATFORM": "offscreen", "PATH": "/usr/bin"}, timeout=60)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={"QT_QPA_PLATFORM": "offscreen", "PATH": "/usr/bin", "CUPS_SERVER": "127.0.0.1:9"}, timeout=60)      # CUPS_SERVER: Der Test braucht keine echten Drucker, die Abfrage dauert sonst je nach Rechner viele Sekunden
     assert r.returncode == 0, r.stderr[-800:]
     return r.stdout.strip()
 

@@ -61,6 +61,10 @@ def detect(root: Path, settings: ProjectSettings | None = None) -> BuildSystem |
         return BuildSystem("npm", "npm", [(["npm", "run", "build"], root)], [], "npm")
     if (root / "pyproject.toml").exists() or (root / "setup.py").exists():
         return BuildSystem("python", "Python-Projekt", [(["python3", "-m", "compileall", "-q", "."], root)], [], "")
+    from ..projects.detect import analyze                # Meson, Flutter, Zig, Docker, Unterprojekte …: was die Projekterkennung als Build-Aufgabe gefunden hat
+    target = next((t for t in analyze(root, s).targets if t.kind == "build"), None)
+    if target:
+        return BuildSystem(target.group.lower(), target.group, [(["bash", "-c", target.cmd], target.cwd)], [], target.tool)
     return None
 
 

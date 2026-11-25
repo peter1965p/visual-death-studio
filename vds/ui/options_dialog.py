@@ -102,7 +102,8 @@ class OptionsDialog(QDialog):
         form.addRow("Tab-Breite", self._int("editor/tab_width", " Zeichen"))
         lay.addLayout(form)
         for key, text in (("editor/use_spaces", "Tab-Taste fügt Leerzeichen ein (aus = echte Tabulatoren)"), ("editor/word_wrap", "Zeilenumbruch am Fensterrand"),
-                          ("editor/whitespace", "Leerzeichen und Tabulatoren anzeigen")):
+                          ("editor/whitespace", "Leerzeichen und Tabulatoren anzeigen"), ("editor/minimap", "Minimap anzeigen"),
+                          ("editor/indent_guides", "Einrückungslinien anzeigen")):
             lay.addWidget(self._bool(key, text))
         box = QGroupBox("Automatisch speichern"); f2 = QFormLayout(box)
         f2.addRow("Alle", self._int("editor/autosave_seconds", " Sekunden (0 = aus)"))
@@ -153,6 +154,8 @@ class OptionsDialog(QDialog):
         exe = claude_cli.find()
         f.addRow("Status", QLabel(f"gefunden: {exe}" if exe else "nicht gefunden – siehe claude.com/claude-code"))
         f.addRow("Modell für Vervollständigung", self._combo("ai/completion_model", MODELS))
+        f.addRow(self._bool("ai/aidesc_mcp", "AI-Desc im Chat anbinden (frühere Chats durchsuchen, Systemstatus, lokale Modelle; gefundene Inhalte gehen an Anthropic)"))
+        f.addRow("AI-Desc-Ordner", self._text("ai/aidesc_path", "~/Dev/AI-Desc"))
         lay.addWidget(self.cli_box)
 
         self.api_box = QGroupBox("Claude-API")

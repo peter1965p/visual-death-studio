@@ -1,5 +1,5 @@
-"""Code-Editor: Zeilennummern, Haltepunkt-Gutter, aktuelle Zeile, Diagnosen, Auto-Einrückung."""
-from PySide6.QtCore import QRect, QSize, Qt, Signal
+"""Code-Editor: Zeilennummern, Haltepunkte, Lesezeichen, Faltung, Minimap, Einrückungslinien, Klammerpaare, aktuelle Zeile, Diagnosen, Auto-Einrückung."""
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtCore import QPoint, QPointF, QTimer
 from PySide6.QtGui import QTextCursor, QColor, QFont, QPainter, QPen, QPolygonF, QTextCharFormat, QTextFormat, QTextOption
 from PySide6.QtWidgets import QInputDialog, QMenu, QPlainTextEdit, QTextEdit, QToolTip, QWidget
@@ -15,9 +15,12 @@ from ..theme import EDITOR_FONT
 from ..ai.completion import build_prompt
 from .completion import CompletionPopup, SignatureTip, SuggestionCard
 from .highlighter import PygmentsHighlighter
+from .minimap import Minimap
+from .structure import fold_end, indent_width, match_bracket, shift_lines
 from ..theme import t as tc
 
 SEV_COLOR = {k: tc(v) for k, v in {"error": "#ff4d6d", "warning": "#ffc474", "info": "#5ee7ff"}.items()}
+FOLD_ZONE = 16          # Breite der Faltspalte am rechten Rand der Zeilennummern
 
 
 
@@ -33,7 +36,10 @@ class _Gutter(QWidget):
         self.ed.paint_gutter(e)
 
     def mousePressEvent(self, e):
-        if e.position().x() < 20:
+        if e.position().x() >= self.width() - FOLD_ZONE:
+            if e.button() == Qt.LeftButton:
+                self.ed.toggle_fold(self.ed.cursorForPosition(e.position().toPoint()).block().blockNumber())
+        elif e.position().x() < 20:
             line = self.ed.cursorForPosition(e.position().toPoint()).block().blockNumber() + 1
             if e.button() == Qt.LeftButton:
                 self.ed.toggle_breakpoint(line)
@@ -67,6 +73,9 @@ class CodeEditor(QPlainTextEdit):
         self.bp_conditions: dict[int, str] = {}
         self.bp_disabled: set[int] = set()
         self.exec_line: int | None = None     # aktuelle Debugger-Zeile (gelb)
+        self.bookmarks: set[int] = set()      # 1-basiert, wandern wie Haltepunkte mit dem Text
+        self.folded: set[int] = set()         # Blocknummern (0-basiert) der eingeklappten Kopfzeilen
+        self._line_count = 1
         self.diagnostics: list = []   # [(severity, message, line, col)] – Build + Language Server zusammen
         self._diag_build: list = []
         self._diag_lsp: list = []
@@ -93,10 +102,11 @@ class CodeEditor(QPlainTextEdit):
         self.viewport().setMouseTracking(True)
         self.highlighter = PygmentsHighlighter(self.document(), filename)
         self.gutter = _Gutter(self)
-        self.blockCountChanged.connect(lambda: self.setViewportMargins(self.gutter_width(), 0, 0, 0))
+        self.minimap = Minimap(self)
+        self.blockCountChanged.connect(lambda: self._update_margins())
+        self.document().contentsChange.connect(self._text_changed)
         self.updateRequest.connect(self._scroll_gutter)
         self.cursorPositionChanged.connect(self._on_cursor)
-        self.setViewportMargins(self.gutter_width(), 0, 0, 0)
         self.apply_options()
         self._on_cursor()
 
@@ -122,20 +132,33 @@ class CodeEditor(QPlainTextEdit):
         opt.setFlags(flags | QTextOption.ShowTabsAndSpaces if options.get("editor/whitespace") else flags & ~QTextOption.ShowTabsAndSpaces)
         self.document().setDefaultTextOption(opt)
         self._ctimer.setInterval(options.get("intellisense/delay_ms"))
+        self.minimap.setVisible(options.get("editor/minimap"))
+        self._update_margins()
+        self.viewport().update()
+
+    def tab_size(self) -> int:
+        return options.get("editor/tab_width")
+
+    def _update_margins(self):
+        self.setViewportMargins(self.gutter_width(), 0, self.minimap.width() if not self.minimap.isHidden() else 0, 0)
+        self._place_side_widgets()
+
+    def _place_side_widgets(self):
+        cr = self.contentsRect()
+        self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
+        vp = self.viewport().geometry()
+        self.minimap.setGeometry(QRect(vp.right() + 1, vp.top(), self.minimap.width(), vp.height()))
 
     def refresh_font(self, f: QFont):
         """Neue Schrift übernehmen: Tabbreite und Zeilennummern-Spalte neu berechnen."""
         self.set_editor_font(f)
         self.popup.list.setFont(f); self.sigtip.setFont(f)
         self.apply_options()
-        self.setViewportMargins(self.gutter_width(), 0, 0, 0)
-        cr = self.contentsRect()
-        self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
         self.gutter.update()
 
     # --- Gutter ---------------------------------------------------------------
     def gutter_width(self):
-        return 18 + 12 + self.fontMetrics().horizontalAdvance("9") * max(3, len(str(self.blockCount())))
+        return 18 + 12 + FOLD_ZONE + self.fontMetrics().horizontalAdvance("9") * max(3, len(str(self.blockCount())))
 
     def _scroll_gutter(self, rect, dy):
         if dy:
@@ -143,12 +166,11 @@ class CodeEditor(QPlainTextEdit):
         else:
             self.gutter.update(0, rect.y(), self.gutter.width(), rect.height())
         if rect.contains(self.viewport().rect()):
-            self.setViewportMargins(self.gutter_width(), 0, 0, 0)
+            self._update_margins()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        cr = self.contentsRect()
-        self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
+        self._place_side_widgets()
 
     def paint_gutter(self, e):
         p = QPainter(self.gutter)
@@ -168,13 +190,185 @@ class CodeEditor(QPlainTextEdit):
                         p.setBrush(QColor(tc("#ff2d6f"))); p.setPen(Qt.NoPen); p.drawEllipse(4, y, 10, 10)
                         if self.bp_conditions.get(n):               # bedingt: weißes Kreuz
                             p.setPen(QPen(QColor("white"), 1.4)); p.drawLine(6, y + 5, 12, y + 5); p.drawLine(9, y + 2, 9, y + 8)
+                if n in self.bookmarks:                             # Lesezeichen: Fähnchen
+                    p.setBrush(QColor(tc("#00e5ff"))); p.setPen(Qt.NoPen)
+                    y = top + (h - 12) // 2
+                    p.drawPolygon(QPolygonF([QPointF(4, y), QPointF(14, y), QPointF(14, y + 12), QPointF(9, y + 8), QPointF(4, y + 12)]))
                 if n == self.exec_line:                             # Ausführungspfeil
                     p.setBrush(QColor(tc("#ffd60a"))); p.setPen(Qt.NoPen)
                     p.drawPolygon(QPolygonF([QPointF(2, top + 3), QPointF(16, top + h / 2), QPointF(2, top + h - 3)]))
                 p.setPen(QColor("#9ad7ff" if block.blockNumber() == cur else "#4d5b82"))
-                p.drawText(0, top, self.gutter.width() - 6, h, Qt.AlignRight | Qt.AlignVCenter, str(n))
+                p.drawText(0, top, self.gutter.width() - FOLD_ZONE - 2, h, Qt.AlignRight | Qt.AlignVCenter, str(n))
+                if self._foldable(block.blockNumber()):             # Faltmarke: gefüllt = eingeklappt
+                    self._paint_fold_mark(p, block.blockNumber() in self.folded, top, h)
             block = block.next()
             top += h
+        p.end()
+
+    def _paint_fold_mark(self, p, closed: bool, top: int, h: int):
+        x, y = self.gutter.width() - FOLD_ZONE + 3, top + h / 2
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(tc("#00e5ff" if closed else "#6f7fa6")))
+        points = [QPointF(x, y - 5), QPointF(x + 7, y), QPointF(x, y + 5)] if closed else [QPointF(x - 1, y - 3), QPointF(x + 9, y - 3), QPointF(x + 4, y + 4)]
+        p.drawPolygon(QPolygonF(points))
+
+    # --- Faltung -------------------------------------------------------------------
+    def _line_text(self, number: int):
+        block = self.document().findBlockByNumber(number)
+        return block.text() if block.isValid() else None
+
+    def _foldable(self, number: int) -> bool:
+        """Schnelle Prüfung fürs Zeichnen: Die nächste nicht leere Zeile ist tiefer eingerückt."""
+        block = self.document().findBlockByNumber(number)
+        if not block.text().strip():
+            return False
+        base, tab, nxt = indent_width(block.text(), self.tab_size()), self.tab_size(), block.next()
+        while nxt.isValid() and not nxt.text().strip():
+            nxt = nxt.next()
+        return nxt.isValid() and indent_width(nxt.text(), tab) > base
+
+    def toggle_fold(self, number: int | None = None):
+        """Klappt den Block in dieser Zeile ein oder aus; ohne Angabe den an der Cursorzeile oder den, in dem der Cursor steht."""
+        number = self.textCursor().blockNumber() if number is None else number
+        if number not in self.folded and not self._foldable(number):
+            number = self._enclosing_fold(number)
+            if number is None:
+                return
+        (self.folded.discard if number in self.folded else self.folded.add)(number)
+        self._apply_folds()
+
+    def _enclosing_fold(self, number: int) -> int | None:
+        tab, block = self.tab_size(), self.document().findBlockByNumber(number)
+        if not block.text().strip():
+            return None
+        depth, block = indent_width(block.text(), tab), block.previous()
+        while block.isValid():
+            if block.text().strip() and indent_width(block.text(), tab) < depth:
+                return block.blockNumber()
+            block = block.previous()
+        return None
+
+    def fold_all(self):
+        self.folded = {b for b in range(self.blockCount()) if self._foldable(b)}
+        self._apply_folds()
+
+    def unfold_all(self):
+        self.folded.clear()
+        self._apply_folds()
+
+    def _apply_folds(self):
+        """Sichtbarkeit aller Zeilen aus `folded` neu aufbauen. Der Text bleibt unberührt: Speichern, Suchen und Kopieren sehen alles.
+        Eine Faltung, deren Kopfzeile nach einer Änderung nichts mehr umschließt, fällt dabei weg."""
+        doc, hidden = self.document(), set()
+        for number in sorted(self.folded):
+            end = fold_end(self._line_text, number, self.tab_size()) if number not in hidden else None
+            if end is None:
+                if number not in hidden:
+                    self.folded.discard(number)
+                continue
+            hidden.update(range(number + 1, end + 1))
+        block = doc.firstBlock()
+        while block.isValid():
+            visible = block.blockNumber() not in hidden
+            if block.isVisible() != visible:
+                block.setVisible(visible)
+                block.setLineCount(max(1, block.layout().lineCount()) if visible else 0)
+            block = block.next()
+        cursor_block = self.textCursor().block()
+        if not cursor_block.isVisible():                        # der Cursor bleibt nicht in unsichtbarem Text: er geht auf die Kopfzeile
+            while cursor_block.isValid() and not cursor_block.isVisible():
+                cursor_block = cursor_block.previous()
+            c = self.textCursor(); c.setPosition(cursor_block.position()); self.setTextCursor(c)
+        doc.markContentsDirty(0, doc.characterCount())
+        self.viewport().update(); self.gutter.update(); self.minimap.update()
+
+    def _reveal_cursor(self):
+        """Springt der Cursor in eingeklappten Text (Suche, Gehe zu, Fehlerliste), klappt der Block auf."""
+        block = self.textCursor().block()
+        if block.isVisible() or not self.folded:
+            return
+        number = block.blockNumber()
+        for head in sorted(self.folded, reverse=True):
+            if head < number and (end := fold_end(self._line_text, head, self.tab_size())) is not None and number <= end:
+                self.folded.discard(head)
+        self._apply_folds()
+
+    def _text_changed(self, pos: int, _removed: int, _added: int):
+        """Nach jeder Textänderung wandern Haltepunkte, Lesezeichen und Faltungen mit ihren Zeilen."""
+        count = self.blockCount()
+        delta, self._line_count = count - self._line_count, count
+        if delta:
+            block = self.document().findBlock(pos)
+            line = block.blockNumber() + 1
+            if delta > 0 and pos == block.position():           # neue Zeile direkt vor dieser: die Zeile selbst rutscht mit nach unten
+                line -= 1
+            before = set(self.breakpoints)
+            self.breakpoints = shift_lines(self.breakpoints, line, delta)
+            if self.breakpoints != before:
+                moved = dict(zip(sorted(before), [next(iter(shift_lines({m}, line, delta))) for m in sorted(before)]))
+                self.bp_conditions = {moved[k]: v for k, v in self.bp_conditions.items() if k in moved}
+                self.bp_disabled = {moved[k] for k in self.bp_disabled if k in moved}
+                QTimer.singleShot(0, self._bp_changed)          # nicht mitten in der Textänderung nach außen melden
+            self.bookmarks = shift_lines(self.bookmarks, line, delta)
+            self.folded = {f - 1 for f in shift_lines({f + 1 for f in self.folded}, line, delta)}
+            if self.exec_line and self.exec_line > line:
+                self.exec_line = max(line, self.exec_line + delta)
+        if self.folded:
+            QTimer.singleShot(0, self._apply_folds)             # die Sichtbarkeit darf nicht mitten in der Textänderung umgebaut werden
+
+    # --- Lesezeichen ------------------------------------------------------------------
+    def toggle_bookmark(self, line: int | None = None):
+        line = self.textCursor().blockNumber() + 1 if line is None else line
+        (self.bookmarks.discard if line in self.bookmarks else self.bookmarks.add)(line)
+        self.gutter.update(); self.minimap.update()
+
+    def next_bookmark(self, step: int = 1) -> bool:
+        """Zum nächsten (step=1) oder vorigen (step=-1) Lesezeichen, am Dateiende geht es von vorn weiter."""
+        if not self.bookmarks:
+            return False
+        marks, here = sorted(self.bookmarks), self.textCursor().blockNumber() + 1
+        ahead = [m for m in marks if m > here] if step > 0 else [m for m in reversed(marks) if m < here]
+        self.goto(ahead[0] if ahead else (marks[0] if step > 0 else marks[-1]))
+        return True
+
+    def prev_bookmark(self) -> bool:
+        return self.next_bookmark(-1)
+
+    # --- Zeichnen über dem Text ---------------------------------------------------------
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self.viewport())
+        offset = self.contentOffset()
+        char = self.fontMetrics().horizontalAdvance(" ")
+        unit, guides = max(1, self.tab_size()), options.get("editor/indent_guides")
+        x0 = offset.x() + self.document().documentMargin()
+        line_pen, tag_ink = QColor(tc("#4d5b82")), QColor(tc("#8fa3c7"))
+        line_pen.setAlpha(110)
+        block = self.firstVisibleBlock()
+        while block.isValid():
+            box = self.blockBoundingGeometry(block).translated(offset)
+            if box.top() > e.rect().bottom():
+                break
+            if block.isVisible():
+                if guides:
+                    probe = block                              # Leerzeilen übernehmen die Linien der nächsten Zeile mit Inhalt
+                    while probe.isValid() and not probe.text().strip():
+                        probe = probe.next()
+                    depth = indent_width(probe.text(), unit) if probe.isValid() else 0
+                    p.setPen(line_pen)
+                    for level in range(1, depth // unit + (1 if depth % unit else 0)):
+                        x = x0 + level * unit * char
+                        p.drawLine(round(x), round(box.top()), round(x), round(box.bottom()))
+                if block.blockNumber() in self.folded:         # Hinweis auf den eingeklappten Inhalt
+                    end = fold_end(self._line_text, block.blockNumber(), unit)
+                    if end is not None:
+                        width = block.layout().lineAt(0).naturalTextWidth() if block.layout().lineCount() else 0
+                        count = end - block.blockNumber()
+                        text = f"⋯ {count} Zeile{'' if count == 1 else 'n'}"
+                        rect = QRectF(x0 + width + char, box.top() + 1, self.fontMetrics().horizontalAdvance(text) + 10, box.height() - 2)
+                        p.setPen(line_pen); p.setBrush(Qt.NoBrush); p.drawRoundedRect(rect, 3, 3)
+                        p.setPen(tag_ink); p.drawText(rect, Qt.AlignCenter, text)
+            block = block.next()
         p.end()
 
     def toggle_breakpoint(self, line: int):
@@ -225,6 +419,7 @@ class CodeEditor(QPlainTextEdit):
     def _on_cursor(self):
         c = self.textCursor()
         self.cursorInfo.emit(c.blockNumber() + 1, c.positionInBlock() + 1)
+        self._reveal_cursor()
         self.refresh_selections()
         self.gutter.update()
 
@@ -270,6 +465,15 @@ class CodeEditor(QPlainTextEdit):
             if not c.hasSelection():
                 c.setPosition(block.position()); c.setPosition(block.position() + max(1, block.length() - 1), QTextCursor.MoveMode.KeepAnchor)
             s.cursor = c
+            sels.append(s)
+        doc = self.document()
+        pair = match_bracket(lambda i: doc.characterAt(i), doc.characterCount() - 1, self.textCursor().position())
+        for at in pair or ():                                   # das Klammerpaar am Cursor
+            s = QTextEdit.ExtraSelection()
+            s.format.setBackground(QColor(0, 229, 255, 60))
+            s.format.setForeground(QColor(tc("#ffffff")))
+            s.cursor = self.textCursor()
+            s.cursor.setPosition(at); s.cursor.setPosition(at + 1, QTextCursor.MoveMode.KeepAnchor)
             sels.append(s)
         self.setExtraSelections(sels)
 

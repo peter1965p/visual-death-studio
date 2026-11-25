@@ -1,7 +1,9 @@
 """Hauptfenster: Test-Explorer-Dock entdeckt und führt Tests eines Projekts aus."""
+import sys
 import textwrap
 
 from vds.app import MainWindow
+from vds.project import ProjectSettings
 
 
 def test_test_explorer_in_main_window(qapp, pump, tmp_path):
@@ -12,6 +14,7 @@ def test_test_explorer_in_main_window(qapp, pump, tmp_path):
         def test_schlecht():
             assert 1 == 2
     '''))
+    ProjectSettings(python=sys.executable).save(tmp_path)                 # das venv der Tests: Nur dort ist pytest sicher installiert, im System-Python oft nicht
     w = MainWindow()
     w.show()
     w.set_root(tmp_path)

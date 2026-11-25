@@ -4,14 +4,14 @@ import json
 from collections import Counter
 import keyword
 import re
-import shutil
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, QTextStream, QTimer, Signal
 from PySide6.QtGui import QTextDocument
 
-from ..build.languages import lang_for
+from . import servers as server_table
+from .servers import lang_for
 from ..build.runner import Runner
 from ..branding import SETTINGS_APP, SETTINGS_ORG
 from .client import LspClient
@@ -59,6 +59,9 @@ class _Doc:
         self.timer = QTimer(singleShot=True, interval=160)
 
 
+KEYWORDS["blade"] = KEYWORDS.get("php", [])
+
+
 class LspManager(QObject):
     diagnostics = Signal(str, list)        # Pfad, [(Schwere, Text, Zeile(1), Spalte(1))]
     editRequested = Signal(dict, str)      # Server will Änderungen anwenden: {Pfad: [Edit]}, Beschriftung
@@ -78,14 +81,14 @@ class LspManager(QObject):
 
     # --- Server ----------------------------------------------------------------------------------------------
     def _command(self, lang) -> list | None:
-        if not lang or not lang.lsp:
+        if not lang:
             return None
-        cmd = list(lang.lsp)
         if lang.id == "python":
             local = Path(sys.executable).parent / "pylsp"
             if local.exists():
-                cmd[0] = str(local)
-        return cmd if (shutil.which(cmd[0]) or Path(cmd[0]).exists()) else None
+                return [str(local)]
+        found = server_table.choose(lang.id)
+        return list(found.command) if found else None
 
     def _server(self, lang) -> _Server | None:
         sv = self.servers.get(lang.id)
@@ -96,7 +99,8 @@ class LspManager(QObject):
         self.servers[lang.id] = sv
         if not cmd:
             sv.state = "failed"
-            self.statusChanged.emit(lang.id, f"kein Server ({lang.lsp[0] if lang.lsp else 'keiner'})")
+            wanted = server_table.suggestion(lang.id)
+            self.statusChanged.emit(lang.id, f"{wanted.command[0]} fehlt" if wanted else "")
             return None
         sv.state = "starting"
         self.statusChanged.emit(lang.id, "startet …")
@@ -145,6 +149,18 @@ class LspManager(QObject):
             if sv.client:
                 sv.client.stop()
         self.servers.clear(); self.docs.clear()
+
+    def retry(self, lang_id: str):
+        """Nach dem Installieren eines Sprachservers: neu starten und die offenen Dateien dieser Sprache anmelden."""
+        old = self.servers.pop(lang_id, None)
+        if old and old.client:
+            old.client.stop()
+        for st in list(self.docs.values()):
+            lang = lang_for(st.doc.path)
+            if lang and lang.id == lang_id:
+                sv = self._server(lang)
+                if sv:
+                    self.when_ready(sv, lambda sv=sv, lang=lang, st=st: self._open(sv, lang, st))
 
     def when_ready(self, sv, job):
         job() if sv.state == "ready" else sv.queue.append(job)
@@ -408,6 +424,10 @@ class LspManager(QObject):
             edits = self._edits_from((params or {}).get("edit"))
             self.editRequested.emit(edits, (params or {}).get("label", "Refactoring"))
             sv.client.reply(req_id, {"applied": bool(edits)})
+        elif method == "workspace/configuration":
+            sv.client.reply(req_id, [None for _ in (params or {}).get("items", [])])       # keine eigenen Einstellungen: der Server nimmt seine Vorgaben
+        else:
+            sv.client.reply(req_id, None)              # Anmeldungen, Fortschrittsanzeigen …: Unbeantwortet warten manche Server ewig
 
     def supports(self, path: Path, feature: str) -> bool:
         """feature: rename | references | formatting | codeAction"""

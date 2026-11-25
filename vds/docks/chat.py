@@ -78,6 +78,7 @@ class ChatPanel(QWidget):
     def _attach_agent(self):
         """Agent des gewählten Anbieters (Claude Code oder API) anlegen und verdrahten."""
         self.claude = backend.make_agent(self)
+        self.claude.use_aidesc = True                # wirkt nur bei Claude Code; der API-Agent hat eigene Werkzeuge
         self.claude.text.connect(lambda t: self._add(t.strip()))
         self.claude.tool.connect(lambda t: self._add(f"*⚙ {t}*"))
         self.claude.finished.connect(self._finished)

@@ -70,7 +70,9 @@ Eine Laravel-, PHP-, React-, Vue-, Angular- oder reine HTML-Seite öffnen, in de
 - **Projekt importieren** (Strg+Alt+I): Qt Creator (`.pro` per qmake, CMake-Projekte), Visual Studio (`.sln`, `.csproj`, `.vcxproj` – C++ wird über eine abgeleitete CMake-Datei unter `.vds/import/` gebaut), Code::Blocks (`.cbp`), IntelliJ (`.iml`), Eclipse (`.project`, Java mit `javac`), Swift Package, Xcode (nur zum Bearbeiten), Maven, Gradle. Das Projekt bleibt an seinem Ort; die IDE trägt nur Build- und Startbefehl ein, eigene Einträge bleiben erhalten
 - **Projekt exportieren** (Strg+Alt+X): Qt Creator (`CMakeLists.txt` bzw. `.pyproject`), Visual Studio (`.sln` bzw. CMake-Ordner), VS Code (`tasks.json`, `launch.json`), IntelliJ/PyCharm/CLion (`.idea`, `.iml`), Eclipse (`.project`, `.classpath`) oder ZIP ohne `venv`, `node_modules`, `build` u. a.; vorhandene Dateien werden nie überschrieben
 - **Startseite** (Strg+Umschalt+H): zuletzt geöffnete Projekte mit erkanntem Typ (Laravel, Spring Boot, React, Vue, Angular, Python …) und Schnellaktionen
-- **Start-Befehl pro Projekt** (z. B. `npm run dev`, `php -S …`) und weitere Einstellungen unter Projekt → Eigenschaften
+- **Projekterkennung:** Beim Öffnen wertet die IDE den Ordner aus und führt dabei nichts aus. Sie versteht Laravel, Symfony, WordPress und PHP; Node mit npm, pnpm, yarn oder bun samt Next, Nuxt, Vue, React, Angular, Svelte, Vite; Django, FastAPI, Flask, Streamlit, uv, Poetry; Rails; Phoenix; Rust, Go, .NET, Maven, Gradle, Spring Boot, Android, Flutter, Dart; CMake, Meson, Autotools, Zig, Swift, Haskell; Make, just, Task, Procfile, `.vscode/tasks.json`; Docker Compose, Nix, `PKGBUILD`. Auch mehreres zugleich und Unterprojekte (`frontend/`, `packages/*` …)
+- **Startziel in der Werkzeugleiste:** F5 und Strg+F5 starten, was dort steht; die Wahl gilt je Projekt. Alle weiteren Befehle (Migrationen, Tests, Docker …) liegen unter **Projekt → Aufgaben** und in der Befehlspalette. Debug/Release erscheint nur, wo es etwas bewirkt. Haltepunkte in einem kompilierten Programm schicken F5 an den Debugger
+- **Start-Befehl pro Projekt** (z. B. `npm run dev`, `php -S …`) und weitere Einstellungen unter Projekt → Eigenschaften; ein eigener Befehl hat Vorrang vor der Empfehlung
 
 ---
 
@@ -78,9 +80,10 @@ Eine Laravel-, PHP-, React-, Vue-, Angular- oder reine HTML-Seite öffnen, in de
 
 ![Code-Editor](docs/editor.png)
 
-- **Editor** mit Syntax-Hervorhebung, IntelliSense per LSP (pylsp, clangd) und optionaler Claude-Vervollständigung; sprachabhängige Codeausschnitte in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
+- **Editor** mit Code-Faltung (Strg+M, Strg+M), Minimap, Einrückungslinien, Klammerpaaren, Lesezeichen (Strg+F2) und Zurück/Vor (Alt+←/→); Haltepunkte und Lesezeichen wandern beim Tippen mit ihrer Zeile
+- Syntax-Hervorhebung, IntelliSense per LSP für rund 25 Sprachen (PHP mit Intelephense oder Phpactor, Python, JS/TS, C/C++, Rust, Go, C#, Java, HTML, CSS, YAML, Docker, Ruby, Lua, Dart, Zig …; fehlt ein Server, führt ein Klick in die Statusleiste zur Installation) und optionale Claude-Vervollständigung; sprachabhängige Codeausschnitte in der Toolbox (Python, Node, TypeScript, C, C++, C#, Rust, Go, Java, Bash)
 - **Debugger** für Python, C/C++ (gdb), Node, Java, Go (dlv) und C# (netcoredbg): Haltepunkte, Variablen, Überwachung, Aufrufliste, Direktfenster
-- **Erstellen** erkennt CMake, Make, Cargo, Go, .NET, Maven, Gradle und npm; eigene Build-/Clean-Befehle möglich
+- **Erstellen** nutzt das erkannte Build-System des Projekts; eigene Build-/Clean-Befehle möglich
 - **Test-Explorer** für pytest, unittest, node:test, Go, Cargo und dotnet
 - **Refactorings:** Umbenennen, Verweise suchen, Formatieren, Quick Actions
 - **Befehlspalette und globale Suche** (Strg+Q): Befehle, Dateien, Einstellungen und Textstellen mit unscharfer Suche; Präfixe `>` Befehle, `%` Text, `@` Einstellungen
@@ -101,6 +104,8 @@ Eine Laravel-, PHP-, React-, Vue-, Angular- oder reine HTML-Seite öffnen, in de
 ## Claude
 
 Chat, Agent und Code-Vervollständigung wahlweise über die lokale **Claude-Code-CLI** oder mit **eigenem API-Schlüssel** (Extras → Optionen → Claude): Agent mit Dateiwerkzeugen im Projektordner, Modellwahl, Verbindungstest. Dein Code geht in beiden Fällen an Anthropic; der Schlüssel liegt in einer nur für dich lesbaren Datei im Konfigurationsordner, nie in den Optionen.
+
+**AI-Desc-Anbindung:** Ist AI-Desc unter `~/Dev/AI-Desc` vorhanden (Ordner einstellbar), startet der Claude-Chat dessen MCP-Server mit, sofern Claude Code der Anbieter ist. Claude kann dann deine früheren Chats durchsuchen und lesen, den Systemstatus abfragen und ein lokales Ollama-Modell fragen. Im Chat siehst du jeden Zugriff als „AI-Desc: …“. Gefundene Inhalte gehen wie alles im Chat an Anthropic; abschalten lässt es sich unter Extras → Optionen → Claude. Extras → AI-Desc öffnen startet dessen Fenster.
 
 ---
 

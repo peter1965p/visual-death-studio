@@ -6,7 +6,7 @@ from .branding import SETTINGS_APP, SETTINGS_ORG
 DEFAULTS = {
     # Editor
     "editor/tab_width": 4, "editor/use_spaces": True, "editor/word_wrap": False, "editor/whitespace": False,
-    "editor/autosave_seconds": 0, "editor/autosave_on_focus_loss": False,
+    "editor/autosave_seconds": 0, "editor/autosave_on_focus_loss": False, "editor/minimap": True, "editor/indent_guides": True,
     # IntelliSense
     "intellisense/auto": True, "intellisense/min_chars": 2, "intellisense/delay_ms": 60,
     # Designer
@@ -20,6 +20,7 @@ DEFAULTS = {
     # Web-Vorschau
     "web/auto_open": True, "web/auto_reload": "ohne-hmr", "web/device": "Frei (füllt das Fenster)",
     "ai/completion_model": "haiku",                 # Modell von Claude Code für die Vervollständigung
+    "ai/aidesc_mcp": True, "ai/aidesc_path": "~/Dev/AI-Desc",   # AI-Desc als MCP-Server im Chat
 }
 CHOICES = {"ui/theme": ("neon", "hell"), "claude/provider": ("auto", "cli", "api"), "web/auto_reload": ("nie", "ohne-hmr", "immer"), "claude/api_effort": ("", "low", "medium", "high", "xhigh", "max")}
 LIMITS = {"editor/tab_width": (1, 16), "editor/autosave_seconds": (0, 3600), "intellisense/min_chars": (1, 6), "intellisense/delay_ms": (0, 2000),

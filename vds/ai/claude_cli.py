@@ -7,6 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
+from . import aidesc
+
 FILE_TOOLS = "Write,Edit,Read,Glob,Grep"
 
 
@@ -33,6 +35,9 @@ def describe_tool(name: str, inp: dict, cwd: Path) -> str:
             return str(Path(p).relative_to(cwd))
         except ValueError:
             return str(p)
+    if name.startswith(aidesc.PREFIX):
+        detail = inp.get("text") or inp.get("frage") or inp.get("id") or ""
+        return f"AI-Desc: {name[len(aidesc.PREFIX):]} {str(detail)[:60]}".strip()
     if "file_path" in inp:
         return f"{name} {rel(inp['file_path'])}"
     if name == "Bash":
@@ -47,6 +52,7 @@ class ClaudeProcess(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.use_aidesc = False        # nur der Chat setzt das; der Projekt-Assistent braucht kein Archiv
         self.proc: QProcess | None = None
         self._buf = ""
         self._err = ""
@@ -64,8 +70,13 @@ class ClaudeProcess(QObject):
             return
         self._cwd, self._buf, self._err, self._result = Path(cwd), "", "", None
         tools = FILE_TOOLS + (",Bash" if allow_bash else "")
+        mcp = aidesc.mcp_config() if self.use_aidesc else None
+        if mcp:
+            tools += "," + aidesc.TOOLS
         args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
                 "--allowedTools", tools, "--max-turns", str(max_turns)]
+        if mcp:
+            args += ["--mcp-config", mcp]
         if images:                                              # Claude Code liest Bilder über das Read-Werkzeug von der Platte
             args[1] = prompt + "\n\n[Angehängte Bilder – bitte mit dem Read-Werkzeug ansehen:\n" + "\n".join(str(i) for i in images) + "\n]"
             for d in sorted({str(Path(i).parent) for i in images}):

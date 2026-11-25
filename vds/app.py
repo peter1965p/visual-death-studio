@@ -2,6 +2,7 @@
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QTabBar, QMenu, QDockWid
 
 from .branding import APP_NAME, DESKTOP_ID, SETTINGS_APP, SETTINGS_ORG, app_icon, desktop_entry_exists, install_desktop_entry
 from .build.languages import LANGS, lang_for, parse_problems
+from .editor.structure import NavHistory
 from .build import projects as buildsys
 from .build.runner import Runner
 from .docks.explorer import Explorer
@@ -36,7 +38,8 @@ from .debug.controller import DebugController
 from .ai.completion import MODELS, AiCompletion
 from .lsp.manager import LspManager
 from .project import ProjectSettings
-from .projects import exporter, importer
+from .projects import detect as project_detect, exporter, importer
+from .lsp import servers as lsp_servers
 from .docks.references import ReferencesPanel
 from . import refactor
 from .docks.chat import ChatPanel
@@ -94,6 +97,14 @@ def _shrinkable(widget, limit=80):
     return area
 
 
+class _ClickLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, e):
+        self.clicked.emit()
+        super().mousePressEvent(e)
+
+
 class MainWindow(QMainWindow):
     _update_found = Signal(object)          # Release aus dem Hintergrund-Thread
 
@@ -123,6 +134,7 @@ class MainWindow(QMainWindow):
         step(12, "Starte Sprachdienste …")
         self.lsp = LspManager(self)
         self.project = ProjectSettings()
+        self.project_info = None
         self.tests = TestService(self)
         self.ai = AiCompletion(self)
         self.docs = Documents()
@@ -137,6 +149,7 @@ class MainWindow(QMainWindow):
         self._lsp_status: dict = {}
         self._start_text = " Starten"
         step(58, "Erzeuge Menüs und Befehle …")
+        self.nav, self._nav_moving = NavHistory(), False
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
@@ -325,6 +338,15 @@ class MainWindow(QMainWindow):
             testcancel=A("Testlauf abbrechen", self.tests.cancel),
             pkgs=A("Paket-Manager", self.open_packages, "Ctrl+Alt+P"),
             options=A("Optionen…", self.show_options, "Ctrl+,"),
+            aidesc=A("AI-Desc öffnen", self.open_aidesc),
+            navback=A("Zurück navigieren", lambda: self._nav_go(self.nav.back()), "Alt+Left"),
+            navforward=A("Vorwärts navigieren", lambda: self._nav_go(self.nav.forward()), "Alt+Right"),
+            bookmark=A("Lesezeichen setzen/entfernen", self._ed_call("toggle_bookmark"), "Ctrl+F2"),
+            bookmarknext=A("Nächstes Lesezeichen", self._ed_call("next_bookmark"), "Ctrl+Alt+PgDown"),
+            bookmarkprev=A("Vorheriges Lesezeichen", self._ed_call("prev_bookmark"), "Ctrl+Alt+PgUp"),
+            fold=A("Block ein-/ausklappen", self._ed_call("toggle_fold"), "Ctrl+M, Ctrl+M"),
+            foldall=A("Alles einklappen", self._ed_call("fold_all"), "Ctrl+M, Ctrl+O"),
+            unfoldall=A("Alles ausklappen", self._ed_call("unfold_all"), "Ctrl+M, Ctrl+L"),
             startpage=A("Startseite", self.show_start_page, "Ctrl+Shift+H"),
             webopen=A("Web-Vorschau öffnen", self.open_preview, "Ctrl+Alt+W"),
             webreload=A("Web-Vorschau neu laden", lambda: self.preview.reload(), "Ctrl+Alt+R"),
@@ -371,7 +393,7 @@ class MainWindow(QMainWindow):
         self.m_recent = QMenu("Zuletzt geöffnete Projekte", datei)
         self.m_recent.aboutToShow.connect(self._fill_recent)
         datei.insertMenu(a["startpage"], self.m_recent)
-        menu("&Bearbeiten", [a["palette"], a["palcmd"], a["palfile"], a["palgrep"], None, a["undo"], a["redo"], None, a["cut"], a["copy"], a["paste"], None, a["selall"], None, a["find"], a["goto"], a["gotodef"], a["findrefs"], None, a["rename"], a["quickact"], a["fmtdoc"], a["comment"], None, a["aicomplete"]])
+        menu("&Bearbeiten", [a["palette"], a["palcmd"], a["palfile"], a["palgrep"], None, a["undo"], a["redo"], None, a["cut"], a["copy"], a["paste"], None, a["selall"], None, a["find"], a["goto"], a["gotodef"], a["findrefs"], None, a["rename"], a["quickact"], a["fmtdoc"], a["comment"], None, a["navback"], a["navforward"], None, a["bookmark"], a["bookmarknext"], a["bookmarkprev"], None, a["fold"], a["foldall"], a["unfoldall"], None, a["aicomplete"]])
         v = menu("&Ansicht", [])
         for d in self.all_docks:
             v.addAction(d.toggleViewAction())
@@ -382,8 +404,10 @@ class MainWindow(QMainWindow):
             v.addAction(a[k])
         v.addSeparator()
         v.addAction(a["reset"])
-        menu("&Projekt", [a["newproject"], a["newitem"], a["newform"], a["newfolder"], a["additem"], None, a["setstartup"], a["pkgs"], a["analyze"], None,
-                          a["showfolder"], a["projprops"]])
+        projekt = menu("&Projekt", [a["newproject"], a["newitem"], a["newform"], a["newfolder"], a["additem"], None, a["setstartup"], a["pkgs"], a["analyze"], None,
+                                    a["showfolder"], a["projprops"]])
+        self.m_tasks = QMenu("Aufgaben", projekt)
+        projekt.insertMenu(a["setstartup"], self.m_tasks)
         menu("&Erstellen", [a["build"], a["rebuild"], a["clean"], a["cancelbuild"], None, a["compilefile"]])
         menu("&Test", [a["testexp"], None, a["testall"], a["testfailed"], a["testdiscover"], a["testcancel"]])
         menu("&Debuggen", [a["start"], a["startnd"], a["dpause"], a["stop"], a["drestart"], None, a["stepin"], a["stepover"], a["stepout"], None, a["togglebp"], a["clearbp"], None, a["profile"]])
@@ -396,6 +420,7 @@ class MainWindow(QMainWindow):
         t.addAction(a["editorfont"])
         t.addAction(a["askclaude"])
         t.addAction(a["aimodel"])
+        t.addAction(a["aidesc"])
         t.addSeparator()
         for x in (a["cmpfiles"], a["cmpsaved"], a["cmphead"]):
             t.addAction(x)
@@ -416,8 +441,15 @@ class MainWindow(QMainWindow):
         tb.addAction(a["undo"]); tb.addAction(a["redo"])
         tb.addSeparator()
         self.cfg = QComboBox(); self.cfg.addItems(["Debug", "Release"])
-        self.plat = QComboBox(); self.plat.addItems(["Any CPU", "x64", "x86"])
-        tb.addWidget(self.cfg); tb.addWidget(self.plat)
+        self.cfg.setToolTip("Gilt beim direkten Kompilieren einer C- oder C++-Datei")
+        self.cfg_action = tb.addWidget(self.cfg)
+        self.target_box = QComboBox()
+        self.target_box.setObjectName("targets")
+        self.target_box.setToolTip("Was F5 und Strg+F5 starten. Die Wahl wird je Projekt gemerkt.")
+        self.target_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.target_box.setMaximumWidth(340)
+        self.target_box.activated.connect(self._target_picked)
+        tb.addWidget(self.target_box)
         self.start_btn = QToolButton()
         self.start_btn.setDefaultAction(a["start"])
         self.start_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -431,11 +463,17 @@ class MainWindow(QMainWindow):
         sb = self.statusBar()
         sb.setSizeGripEnabled(False)
         self.st_state = QLabel("Bereit")
-        self.st_lsp = QLabel("")
+        self.st_branch = QLabel("")
+        self.st_branch.setToolTip("Aktueller Git-Branch des Projekts")
+        self.st_lsp = _ClickLabel("")
+        self.st_lsp.clicked.connect(self._lsp_label_clicked)
+        self.st_project = _ClickLabel("")
+        self.st_project.clicked.connect(self._project_label_clicked)
         self.st_pos, self.st_lang = QLabel("Z: 1  Zch: 1"), QLabel("Nur Text")
         sb.addWidget(self.st_state, 1)
-        for w in (self.st_lsp, self.st_pos, self.st_lang, QLabel("UTF-8"), QLabel("LF")):
+        for w in (self.st_project, self.st_branch, self.st_lsp, self.st_pos, self.st_lang, QLabel("UTF-8"), QLabel("LF")):
             sb.addPermanentWidget(w)
+        self.show_branch()
 
     # --- Verdrahtung -------------------------------------------------------------
     def _wire(self):
@@ -455,6 +493,7 @@ class MainWindow(QMainWindow):
         self.changes.pendingChanged.connect(lambda n: self.d_changes.setWindowTitle(f"Änderungen ({n} von Claude)" if n else "Änderungen"))
         self.docs.currentDocChanged.connect(self._doc_changed)
         self.docs.cursorInfo.connect(lambda l, c: self.st_pos.setText(f"Z: {l}  Zch: {c}"))
+        self.docs.cursorInfo.connect(self._nav_note)
         self.docs.breakpointsChanged.connect(lambda: (self.bps.update_list(self.docs.all_breakpoints()), self.dbg.breakpoints_changed()))
         self.docs.docOpened.connect(self.dbg.apply_saved)
         self.bps.toggled.connect(lambda path, line, on: self._bp_edit(path, line, enabled=on))
@@ -608,6 +647,40 @@ class MainWindow(QMainWindow):
     def show_options(self):
         from .ui.options_dialog import OptionsDialog
         OptionsDialog(self).exec()
+
+    # --- Zurück/Vor ---------------------------------------------------------------------------
+    def _nav_note(self, line: int, _col: int):
+        doc = self.docs.current_doc()
+        if doc and doc.kind == "code" and not self._nav_moving:
+            self.nav.note(doc.path, line)
+
+    def _nav_go(self, place):
+        if not place:
+            return
+        path, line = place
+        if not path.exists():
+            return self.statusBar().showMessage(f"Die Datei gibt es nicht mehr: {path.name}", 5000)
+        self._nav_moving = True                                 # der Sprung selbst ist keine neue Stelle im Verlauf
+        try:
+            doc = self.docs.open(path)
+            if doc and doc.kind == "code":
+                doc.view.goto(line)
+        finally:
+            self._nav_moving = False
+
+    def show_branch(self):
+        """Branch in der Statusleiste; leer, wenn das Projekt kein Git-Repository ist oder gerade kein Branch ausgecheckt ist."""
+        try:
+            out = subprocess.run(["git", "-C", str(self.root), "branch", "--show-current"], capture_output=True, text=True, timeout=3)
+            name = out.stdout.strip() if out.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            name = ""
+        self.st_branch.setText(f"⎇ {name}" if name else "")
+
+    def open_aidesc(self):
+        from .ai import aidesc
+        if not aidesc.open_window(self):
+            self.statusBar().showMessage(f"AI-Desc wurde nicht gefunden in {aidesc.folder()}. Den Ordner stellst du unter Extras → Optionen → Claude ein.", 9000)
 
     # --- Startseite -------------------------------------------------------------------------------------
     def show_start_page(self):
@@ -787,6 +860,7 @@ class MainWindow(QMainWindow):
 
     def set_root(self, path: Path):
         self.root = path
+        self.show_branch()
         self.dbg.store = {}
         self.project = ProjectSettings.load(path)
         self.runner.project, self.runner.root = self.project, path
@@ -810,6 +884,7 @@ class MainWindow(QMainWindow):
         self.changes.set_root(path)
         self.packages.set_root(path)
         self.statusBar().setStyleSheet("")
+        self.scan_project()
 
     def open_folder(self):
         p = QFileDialog.getExistingDirectory(self, "Ordner öffnen", str(self.root))
@@ -1107,8 +1182,8 @@ class MainWindow(QMainWindow):
         if target:
             self.toolbox.set_language(lang.id if lang else None)      # Codeausschnitte passend zur Sprache der aktuellen Datei
         self.toolbox.set_target(doc.target if form else "")
-        self.st_lang.setText("Formular-Designer" if form else "Vergleich" if doc and doc.kind == "diff" else (lang.name if lang else "Nur Text"))
-        self._start_text = f" {target.name}" if target else " Starten"
+        self.st_lang.setText("Formular-Designer" if form else "Vergleich" if doc and doc.kind == "diff" else ("Blade" if doc and doc.path.name.endswith(".blade.php") else lang.name if lang else "Nur Text"))
+        self._update_start_controls()
         self._refresh_run_state()
         self.setWindowTitle(f"{doc.path.name} – Visual Death Studio" if doc else "Visual Death Studio")
         if form:
@@ -1150,27 +1225,117 @@ class MainWindow(QMainWindow):
         self.runner.start_steps(steps, group=True)
         return True
 
-    def run_project_command(self, mode) -> bool:
-        """Start-Befehl aus den Projekteigenschaften (z. B. Dev-Server); gilt für F5 und Strg+F5."""
-        cmd = self.project.run_cmd.strip()
-        if not cmd and mode != "build":
-            # kein Start-Befehl eingetragen: bei Dateien ohne eigenen Interpreter (html, vue, css, tsx …) und bei php im Laravel-Projekt den erkannten Dev-Server nehmen
-            doc = self.docs.current_doc()
-            target = doc.run_target if doc and doc.kind != "diff" else None
-            lang = lang_for(target) if target else None
-            auto = devserver.detect_command(self.root)
-            if auto and (lang is None or (lang.id == "php" and (self.root / "artisan").is_file())) and not (doc and doc.kind == "form" and doc.target not in designer_targets.WEB):
-                cmd = auto
-        if not cmd or mode == "build":
-            return False
+    # --- Projekterkennung: Startziele und Aufgaben ------------------------------------------------------------
+    def scan_project(self):
+        """Projektordner neu auswerten; die Oberfläche ändert sich nur, wenn sich am Ergebnis etwas geändert hat."""
+        info = project_detect.analyze(self.root, self.project)
+        if self.project_info is not None and self.project_info.signature() == info.signature() and self.project_info.root == info.root:
+            return self._update_start_controls()
+        self.project_info = info
+        self._fill_targets()
+        self._fill_tasks()
+        names = info.stacks[:3] + ([f"+{len(info.stacks) - 3}"] if len(info.stacks) > 3 else [])
+        self.st_project.setText(" · ".join(names))
+        self.st_project.setToolTip("Erkannt: " + ", ".join(info.stacks) + ". Klick zeigt die Aufgaben des Projekts." if info.stacks else "")
+
+    def _target_setting(self) -> str:
+        return f"project/target/{self.root}"
+
+    def active_target(self) -> tuple:
+        """(Ziel oder None für die aktive Datei, selbst gewählt?). Ohne eigene Wahl gilt eine gesetzte Startdatei, sonst die Empfehlung der Erkennung."""
+        key = str(self.settings.value(self._target_setting()) or "")
+        if key == "file":
+            return None, True
+        chosen = self.project_info.find(key) if key else None
+        if chosen:
+            return chosen, True
+        target = self.project_info.default
+        if target is None or (self.project.startup_path(self.root) and not self.project.run_cmd.strip()):
+            return None, False
+        doc = self.docs.current_doc()
+        if doc and doc.kind == "form" and doc.target not in designer_targets.WEB:
+            return None, False
+        file = doc.run_target if doc and doc.kind != "diff" else None
+        lang = lang_for(file) if file else None
+        return (None if lang and not target.covers(lang.id) else target), False
+
+    def target_script(self) -> Path | None:
+        """Python-Skript des gewählten Ziels: F5 startet es im Debugger."""
+        target, _ = self.active_target()
+        return target.cwd / target.file if target and target.file else None
+
+    def _fill_targets(self):
+        box, info = self.target_box, self.project_info
+        box.clear()
+        box.addItem("Aktive Datei", "file")
+        for t in info.startable:
+            box.addItem(t.name + (f"  (fehlt: {t.missing_tool()})" if t.missing_tool() else ""), t.key)
+            box.setItemData(box.count() - 1, t.cmd, Qt.ToolTipRole)
+        self._update_start_controls()
+
+    def _fill_tasks(self):
+        self.m_tasks.clear()
+        groups: dict = {}
+        for t in self.project_info.targets:
+            groups.setdefault(t.group or "Projekt", []).append(t)
+        for group, targets in groups.items():
+            sub = self.m_tasks.addMenu(group) if len(groups) > 1 else self.m_tasks
+            for t in targets:
+                sub.addAction(t.name, lambda t=t: self.run_target(t)).setToolTip(t.cmd)
+        self.m_tasks.addSeparator()
+        self.m_tasks.addAction("Projekt neu erkennen", self.scan_project)
+        self.m_tasks.menuAction().setEnabled(True)
+
+    def _update_start_controls(self):
+        """Start-Knopf und Auswahl dem Ziel anpassen; Debug/Release nur zeigen, wo die Wahl etwas bewirkt."""
+        if self.project_info is None:
+            return
+        target, _ = self.active_target()
+        i = self.target_box.findData(target.key if target else "file")
+        self.target_box.setCurrentIndex(max(i, 0))
+        doc = self.docs.current_doc()
+        file = doc.run_target if doc and target is None else None
+        self._start_text = f" {file.name}" if file else " Starten"
+        lang = lang_for(file) if file else None
+        self.cfg_action.setVisible(bool(lang and lang.id in ("c", "cpp")))
+
+    def _target_picked(self, _index):
+        self.settings.setValue(self._target_setting(), self.target_box.currentData())
+        self._update_start_controls()
+        self._refresh_run_state()
+
+    def _project_label_clicked(self):
+        self.m_tasks.exec(self.st_project.mapToGlobal(self.st_project.rect().topLeft()))
+
+    def run_target(self, target) -> bool:
+        """Ein Ziel oder eine Aufgabe in dessen Ordner ausführen, Ausgabe unten. Ein fehlendes Werkzeug wird benannt, statt dass die Shell nur „command not found“ meldet."""
         if self.runner.busy:
+            self.statusBar().showMessage("Es läuft schon etwas. Erst anhalten (Umschalt+F5).", 5000)
             return True
         self.docs.save_all()
         self.d_output.show(); self.d_output.raise_(); self.output.clear(); self.errors.set_source("build", [])
-        self.output.append(f"Start-Befehl: {cmd}  (Stopp: Umschalt+F5)\n", "info")
-        self._build_base = self.root
-        self.runner.start_steps([(["bash", "-c", cmd], self.root)], group=True)
+        missing = target.missing_tool()
+        if missing:
+            self.output.append(dbg_tools.missing_message(missing, target.name) + "\n", "stderr")
+            return True
+        self.output.append(f"Start-Befehl: {target.cmd}  (Stopp: Umschalt+F5)\n", "info")
+        self._build_base = target.cwd
+        self.runner.start_steps([(["bash", "-c", target.cmd], target.cwd)], group=True)
         return True
+
+    def run_project_command(self, mode, debug=False) -> bool:
+        """Das gewählte Startziel ausführen. False heißt: Die aktive Datei läuft wie bisher, bei F5 im Debugger.
+
+        F5 geht trotz Ziel an den Debugger, wenn das Ziel ein Python-Skript ist oder im kompilierten Programm Haltepunkte gesetzt sind; ein Server läuft immer als Befehl."""
+        if mode == "build":
+            return False
+        self.scan_project()
+        target, _ = self.active_target()
+        if target is None:
+            return False
+        if debug and (target.file or (target.kind == "run" and self.docs.all_breakpoints())):
+            return False
+        return self.run_target(target)
 
     def run(self, mode, debug=False, _retry=False):
         doc = self.docs.current_doc()
@@ -1303,9 +1468,34 @@ class MainWindow(QMainWindow):
 
     def _update_lsp_label(self):
         d = self.docs.current_doc()
-        lang = lang_for(d.path) if d and d.kind == "code" else None
+        lang = lsp_servers.lang_for(d.path) if d and d.kind == "code" else None
         txt = self._lsp_status.get(lang.id) if lang else None
         self.st_lsp.setText(f"IntelliSense: {txt}" if txt else "")
+        missing = bool(lang and txt and txt.endswith("fehlt"))
+        self.st_lsp.setCursor(Qt.PointingHandCursor if missing else Qt.ArrowCursor)
+        self.st_lsp.setToolTip("Klick zeigt, wie sich der Sprachserver einrichten lässt." if missing else "")
+
+    def _lsp_label_clicked(self):
+        """Fehlenden Sprachserver anbieten: Mit npm & Co. installiert die IDE ihn nach Rückfrage selbst, sudo und yay brauchen ein echtes Terminal."""
+        d = self.docs.current_doc()
+        lang = lsp_servers.lang_for(d.path) if d and d.kind == "code" else None
+        wanted = lsp_servers.suggestion(lang.id) if lang and not lsp_servers.choose(lang.id) else None
+        if not wanted:
+            return
+        name = wanted.command[0]
+        if not lsp_servers.can_run_install(wanted):
+            QApplication.clipboard().setText(wanted.install)
+            return QMessageBox.information(self, "Sprachserver", f"Für {lang.name} fehlt {name}.\n\nDer Befehl liegt in der Zwischenablage, führe ihn im Terminal aus:\n{wanted.install}\n\n"
+                                           "Danach die Datei neu öffnen oder VDS neu starten.")
+        if self.runner.busy:
+            return self.statusBar().showMessage("Es läuft schon etwas. Erst anhalten (Umschalt+F5).", 5000)
+        if QMessageBox.question(self, "Sprachserver", f"Für {lang.name} fehlt {name}.\n\nJetzt installieren? Das lädt ein Paket aus dem Internet:\n{wanted.install}") != QMessageBox.Yes:
+            return
+        self.d_output.show(); self.d_output.raise_(); self.output.clear()
+        self.output.append(f"{wanted.install}\n", "info")
+        self._after_build = lambda lang_id=lang.id: self.lsp.retry(lang_id)
+        self._build_base = self.root
+        self.runner.start_steps([(["bash", "-c", wanted.install], self.root)])
 
     def ai_complete(self):
         ed = self._ed()
@@ -1641,6 +1831,7 @@ class MainWindow(QMainWindow):
             self.project = dlg.result_settings(self.project)
             self.runner.project = self.project
             self.project.save(self.root)
+            self.scan_project()
             self.statusBar().showMessage("Projekteigenschaften gespeichert.", 5000)
 
     def find(self):
@@ -1758,6 +1949,7 @@ def main():
     if "--install-desktop" in sys.argv:
         print("Starter angelegt:", install_desktop_entry())
         return
+    dbg_tools.extend_path()
     QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)     # nötig für QtWebEngine
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -1774,6 +1966,7 @@ def main():
         splash = SplashScreen()
         splash.show(); splash.step(1, "Starte …")
     w = MainWindow(progress=splash.step if splash else None)
+    app.applicationStateChanged.connect(lambda state: state == Qt.ApplicationActive and w.scan_project())   # z. B. neue Skripte nach composer require im Terminal
     w._default_state = w.saveState()
     w.show()
     w.maybe_show_start_page()

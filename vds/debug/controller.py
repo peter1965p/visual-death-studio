@@ -44,9 +44,9 @@ class DebugController(QObject):
             return
         w = self.w
         doc = w.docs.current_doc()
-        if w.run_project_command("buildrun") or w.run_web(doc):      # Start-Befehl / Web-Formulare: Dev-Server statt Debugger
+        if w.run_project_command("buildrun", debug=True) or w.run_web(doc):      # Start-Befehl / Web-Formulare: Dev-Server statt Debugger
             return
-        file = w.project.startup_path(w.root) or (doc.run_target if doc else None)
+        file = w.target_script() or w.project.startup_path(w.root) or (doc.run_target if doc else None)
         if file is None:
             return w.statusBar().showMessage("Keine Datei zum Debuggen – öffne eine Datei oder lege eine Startdatei fest.", 5000)
         lang = lang_for(file)

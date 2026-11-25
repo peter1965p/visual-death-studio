@@ -32,10 +32,9 @@ class Properties(QTableWidget):
             st = p.stat()
             lang = lang_for(p)
             rows = [("Dateiname", p.name), ("Vollständiger Pfad", str(p)),
-                    ("Typ", "Ordner" if p.is_dir() else (lang.name if lang else "Datei")),
+                    ("Typ", "Ordner" if p.is_dir() else "Blade-Vorlage" if p.name.endswith(".blade.php") else (lang.name if lang else "Datei")),
                     ("Größe", "" if p.is_dir() else f"{st.st_size:,} Bytes".replace(",", ".")),
-                    ("Geändert", datetime.datetime.fromtimestamp(st.st_mtime).strftime("%d.%m.%Y %H:%M:%S")),
-                    ("Buildaktion", "Kompilieren" if lang and not p.is_dir() else "Keine")]
+                    ("Geändert", datetime.datetime.fromtimestamp(st.st_mtime).strftime("%d.%m.%Y %H:%M:%S"))]
         self.setRowCount(len(rows))
         for i, (k, v) in enumerate(rows):
             a = QTableWidgetItem(k); a.setForeground(Qt.gray)

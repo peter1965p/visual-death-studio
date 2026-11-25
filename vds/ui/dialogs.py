@@ -138,7 +138,9 @@ TOOLS = [
     ("rustc", "Rust kompilieren", "sudo pacman -S rust"), ("cargo", "Rust-Projekte", "sudo pacman -S rust"),
     ("dotnet", "C# bauen und ausführen", dbg_tools.HINTS["dotnet"]), ("netcoredbg", "Debugger für C#", dbg_tools.HINTS["netcoredbg"]),
     ("javac", "Java kompilieren", dbg_tools.HINTS["javac"]), ("java", "Java ausführen", dbg_tools.HINTS["javac"]), ("jdb", "Debugger für Java", dbg_tools.HINTS["jdb"]),
-    ("php", "PHP ausführen und Webserver (php -S)", "sudo pacman -S php"), ("mvn", "Maven-Projekte", "sudo pacman -S maven"), ("gradle", "Gradle-Projekte", "sudo pacman -S gradle"),
+    ("php", "PHP ausführen und Webserver (php -S)", "sudo pacman -S php"), ("composer", "PHP-Projekte, Laravel", "sudo pacman -S composer"),
+    ("intelephense", "IntelliSense für PHP", "npm i -g intelephense"), ("gopls", "IntelliSense für Go", "go install golang.org/x/tools/gopls@latest"),
+    ("rust-analyzer", "IntelliSense für Rust", "sudo pacman -S rust-analyzer"), ("docker", "Docker-Projekte", "sudo pacman -S docker docker-compose"), ("mvn", "Maven-Projekte", "sudo pacman -S maven"), ("gradle", "Gradle-Projekte", "sudo pacman -S gradle"),
     ("git", "Versionsverwaltung, Änderungen-Ansicht", "sudo pacman -S git"), ("claude", "Claude-Chat und -Vervollständigung", "siehe claude.com/claude-code"),
 ]
 
