@@ -143,6 +143,9 @@ class DatabasePanel(QWidget):
         self.b_form.setToolTip("Fertiges Datenformular aus der gewählten Tabelle: Felder, Auswahllisten für Fremdschlüssel, Unterformulare")
         self.b_form.clicked.connect(lambda: self._form_for(self.tree.currentItem()))
         self.tree.currentItemChanged.connect(lambda it, _p: self.b_form.setEnabled(self._table_of(it) is not None))
+        self.b_dbs = QPushButton("🛠 In DB Studio"); self.b_dbs.setEnabled(False)
+        self.b_dbs.setToolTip("Datenbank in Pi DB Studio bearbeiten: Schema, ER-Diagramm mit Folgen-Analyse, Import, REST-API")
+        self.b_dbs.clicked.connect(lambda: self.open_in_dbstudio(self._table_of(self.tree.currentItem())))
         self.sql = QPlainTextEdit(); self.sql.setPlaceholderText("SQL eingeben – Strg+Enter führt den markierten Text bzw. alles aus")
         self.sql.setFixedHeight(90)
         self.sql.keyPressEvent = self._sql_key(self.sql.keyPressEvent)
@@ -151,7 +154,7 @@ class DatabasePanel(QWidget):
         right = QWidget(); rl = QVBoxLayout(right); rl.setContentsMargins(0, 0, 0, 0)
         rl.addWidget(self.sql); rl.addWidget(self.b_run); rl.addWidget(self.table, 1)
         sp = QSplitter(); sp.addWidget(self.tree); sp.addWidget(right); sp.setStretchFactor(1, 3)
-        top = QHBoxLayout(); top.addWidget(self.combo, 1); top.addWidget(self.b_connect); top.addWidget(self.b_close); top.addWidget(self.b_form)
+        top = QHBoxLayout(); top.addWidget(self.combo, 1); top.addWidget(self.b_connect); top.addWidget(self.b_close); top.addWidget(self.b_form); top.addWidget(self.b_dbs)
         lay = QVBoxLayout(self); lay.setContentsMargins(6, 6, 6, 6)
         lay.addLayout(top); lay.addWidget(self.info); lay.addWidget(sp, 1)
         self._fill_combo()
@@ -220,6 +223,7 @@ class DatabasePanel(QWidget):
             QMessageBox.warning(self, "Datenbank", err)
             return False
         self.db, self.conn = db, c
+        self.b_dbs.setEnabled(True)
         self._remember(c)
         self.refresh()
         return True
@@ -230,6 +234,7 @@ class DatabasePanel(QWidget):
         if self.db is not None:
             close_db(self.db)
         self.db = self.conn = None
+        self.b_dbs.setEnabled(False); self.b_form.setEnabled(False)
         self.info.setText("Nicht verbunden.")
 
     # --- Anzeige ----------------------------------------------------------------------
@@ -257,6 +262,17 @@ class DatabasePanel(QWidget):
         if t:
             self.formRequested.emit(t)
 
+    def open_in_dbstudio(self, table: str | None = None) -> bool:
+        """Aktuelle Verbindung (und Tabelle) in Pi DB Studio öffnen – ohne Kennwort, das verwaltet DB Studio selbst."""
+        from . import dbstudio
+        if self.conn is None:
+            return False
+        ok, msg = dbstudio.starten(self.conn, table)
+        self.info.setText(msg)
+        if not ok:
+            QMessageBox.information(self, "Pi DB Studio", msg)
+        return ok
+
     def _menu(self, pos):
         from PySide6.QtWidgets import QMenu
         item = self.tree.itemAt(pos)
@@ -265,6 +281,7 @@ class DatabasePanel(QWidget):
         menu = QMenu(self)
         menu.addAction("📋 Formular aus Tabelle erstellen …", lambda: self._form_for(item))
         menu.addAction("Inhalt anzeigen", lambda: self._select_all(item if item.parent() is None else item.parent()))
+        menu.addAction("🛠 In DB Studio bearbeiten", lambda: self.open_in_dbstudio(self._table_of(item)))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _select_all(self, item, _col=0):

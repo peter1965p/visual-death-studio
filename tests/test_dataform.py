@@ -170,3 +170,39 @@ def test_database_panel_requests_form_for_tables_only(qapp, tmp_path):
     panel.tree.setCurrentItem(items["t"])
     assert panel.b_form.isEnabled()
     panel.disconnect()
+
+
+# --- „In DB Studio bearbeiten“ ----------------------------------------------------------------------------------------
+
+def test_dbstudio_arguments_never_contain_password(qapp, tmp_path):
+    import json
+    from vds.docks import dbstudio
+    lite = D.Connection("Shop", "QSQLITE", str(tmp_path / "shop.db"))
+    args = dbstudio.argumente(lite, "Orders")
+    assert args[0] == "--verbindung" and args[2:] == ["--tabelle", "Orders"]
+    assert json.loads(args[1]) == {"art": "sqlite", "datei": str((tmp_path / "shop.db").resolve()), "name": "Shop"}
+    pg = D.Connection("", "QPSQL", "shop", "db.local", 5432, "app", "geheim")
+    d = dbstudio.verbindung(pg)
+    assert d == {"art": "postgresql", "host": "db.local", "datenbank": "shop", "benutzer": "app", "port": 5432}
+    assert "geheim" not in " ".join(dbstudio.argumente(pg))
+    assert dbstudio.verbindung(D.Connection("", "QODBC", "dsn")) is None
+
+
+def test_dbstudio_starts_detached_with_connection(qapp, tmp_path, monkeypatch, pump):
+    import json
+    from vds.docks import dbstudio
+    out = tmp_path / "args.json"
+    script = tmp_path / "fake_dbstudio.py"
+    script.write_text(f"import json, sys\nopen({str(out)!r}, 'w').write(json.dumps(sys.argv[1:]))\n")
+    monkeypatch.setenv("VDS_DBSTUDIO", f"{sys.executable} {script}")
+    p = tmp_path / "a.db"
+    c = sqlite3.connect(p); c.execute("create table t(id integer primary key)"); c.commit(); c.close()
+    panel = D.DatabasePanel(); panel.set_root(tmp_path)
+    assert not panel.b_dbs.isEnabled()
+    assert panel.connect_to(D.Connection("", "QSQLITE", str(p))) and panel.b_dbs.isEnabled()
+    assert panel.open_in_dbstudio("t") and "geöffnet" in panel.info.text()
+    pump(out.exists, 15)
+    args = json.loads(out.read_text())
+    assert args[-2:] == ["--tabelle", "t"] and json.loads(args[1])["datei"] == str(p.resolve())
+    panel.disconnect()
+    assert not panel.b_dbs.isEnabled()
